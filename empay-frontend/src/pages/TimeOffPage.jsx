@@ -103,9 +103,9 @@ export default function TimeOffPage() {
   const load = () => {
     setLoading(true);
     const ep = isEmployee ? '/timeoff/my' : '/timeoff';
-    api.get(ep).then(r => setRequests(r.data)).catch(() => {}).finally(() => setLoading(false));
-    if (isEmployee && user.employee_id) api.get('/timeoff/balances').then(r => setBalances(r.data)).catch(() => {});
-    if (!isEmployee) api.get('/employees').then(r => setEmployees(r.data)).catch(() => {});
+    api.get(ep).then(r => setRequests(Array.isArray(r) ? r : r?.data ?? [])).catch(() => {}).finally(() => setLoading(false));
+    if (isEmployee && user.employee_id) api.get('/timeoff/balances').then(r => setBalances(Array.isArray(r) ? r : r?.data ?? [])).catch(() => {});
+    if (!isEmployee) api.get('/employees').then(r => setEmployees(Array.isArray(r) ? r : r?.data ?? [])).catch(() => {});
   };
   useEffect(() => { load(); }, []);
 

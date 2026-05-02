@@ -128,6 +128,8 @@ export default function PayrollPage() {
   const { user } = useAuth();
   const [records, setRecords] = useState([]);
   const [employees, setEmployees] = useState([]);
+
+  const safeArray = (r) => Array.isArray(r) ? r : r?.data ?? [];
   const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState({ month: new Date().getMonth() + 1, year: new Date().getFullYear(), employee_id: '' });
   const [showGenerate, setShowGenerate] = useState(false);
@@ -135,9 +137,9 @@ export default function PayrollPage() {
 
   const load = () => {
     setLoading(true);
-    api.get(`/payroll?month=${filters.month}&year=${filters.year}${filters.employee_id?`&employee_id=${filters.employee_id}`:''}`).then(r=>setRecords(r.data)).catch(()=>{}).finally(()=>setLoading(false));
+    api.get(`/payroll?month=${filters.month}&year=${filters.year}${filters.employee_id?`&employee_id=${filters.employee_id}`:''}`).then(r=>setRecords(safeArray(r))).catch(()=>{}).finally(()=>setLoading(false));
   };
-  useEffect(() => { api.get('/employees').then(r=>setEmployees(r.data)).catch(()=>{}); }, []);
+  useEffect(() => { api.get('/employees').then(r=>setEmployees(safeArray(r))).catch(()=>{}); }, []);
   useEffect(() => { load(); }, [filters]);
 
   const openPayslip = async (id) => {
