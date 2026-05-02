@@ -17,6 +17,7 @@ export default function AttendancePage() {
   const [actionLoading, setActionLoading] = useState(false);
   const [filters, setFilters] = useState({ month: new Date().getMonth() + 1, year: new Date().getFullYear(), employee_id: '', date: '' });
   const [employees, setEmployees] = useState([]);
+  const [search, setSearch] = useState('');
   const [now, setNow] = useState(new Date());
 
   // Live clock
@@ -71,7 +72,16 @@ export default function AttendancePage() {
   const onLeave = todayStatus?.on_leave;
 
   // Stats from logs
-  const stats = logs.reduce((acc, l) => {
+  const searchLower = search.toLowerCase().trim();
+  const visibleLogs = (!isEmployee && searchLower)
+    ? logs.filter(l =>
+        `${l.first_name} ${l.last_name}`.toLowerCase().includes(searchLower) ||
+        (l.employee_code || '').toLowerCase().includes(searchLower) ||
+        (l.department || '').toLowerCase().includes(searchLower)
+      )
+    : logs;
+
+  const stats = visibleLogs.reduce((acc, l) => {
     acc[l.status] = (acc[l.status] || 0) + 1;
     return acc;
   }, {});
@@ -175,10 +185,8 @@ export default function AttendancePage() {
           {[2024, 2025, 2026].map(y => <option key={y}>{y}</option>)}
         </select>
 
-        {/* Divider */}
         <span style={{ color: 'var(--border)', fontSize: 18, fontWeight: 300, userSelect: 'none' }}>|</span>
 
-        {/* Specific date picker */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-3)', whiteSpace: 'nowrap' }}>Specific Date:</label>
           <input
@@ -201,10 +209,20 @@ export default function AttendancePage() {
         </div>
 
         {!isEmployee && (
-          <select className="form-control" style={{ width: 200 }} value={filters.employee_id} onChange={e => setFilters(p => ({ ...p, employee_id: e.target.value }))}>
-            <option value="">All Employees</option>
-            {employees.map(e => <option key={e.id} value={e.id}>{e.first_name} {e.last_name} ({e.employee_code})</option>)}
-          </select>
+          <>
+            <select className="form-control" style={{ width: 200 }} value={filters.employee_id} onChange={e => setFilters(p => ({ ...p, employee_id: e.target.value }))}>
+              <option value="">All Employees</option>
+              {employees.map(e => <option key={e.id} value={e.id}>{e.first_name} {e.last_name} ({e.employee_code})</option>)}
+            </select>
+            <input
+              type="text"
+              className="form-control"
+              placeholder="Search by name/code..."
+              style={{ width: 180 }}
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+            />
+          </>
         )}
       </div>
 
@@ -217,6 +235,7 @@ export default function AttendancePage() {
               ? new Date(filters.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
               : `${MONTHS[filters.month - 1]} ${filters.year}`
             }
+            {!isEmployee && search && <span style={{ fontSize: 12, fontWeight: 400, color: 'var(--text-3)', marginLeft: 8 }}>— {visibleLogs.length} result{visibleLogs.length !== 1 ? 's' : ''} for "{search}"</span>}
           </div>
         </div>
         {loading ? <div style={{ padding: 40, textAlign: 'center' }}><div className="spinner" style={{ margin: '0 auto' }} /></div> : (
@@ -229,9 +248,9 @@ export default function AttendancePage() {
                 </tr>
               </thead>
               <tbody>
-                {logs.length === 0 ? (
-                  <tr><td colSpan={!isEmployee ? 6 : 5} style={{ textAlign: 'center', padding: 40, color: 'var(--text-3)' }}>No records found</td></tr>
-                ) : logs.map(log => (
+                {visibleLogs.length === 0 ? (
+                  <tr><td colSpan={!isEmployee ? 6 : 5} style={{ textAlign: 'center', padding: 40, color: 'var(--text-3)' }}>No records found{search ? ` for "${search}"` : ''}</td></tr>
+                ) : visibleLogs.map(log => (
                   <tr key={log.id}>
                     {!isEmployee && <td><div style={{ fontWeight: 600 }}>{log.first_name} {log.last_name}</div><div style={{ fontSize: 11, color: 'var(--text-4)' }}>{log.employee_code}</div></td>}
                     <td style={{ fontWeight: 500 }}>{fmtDate(log.date)}</td>

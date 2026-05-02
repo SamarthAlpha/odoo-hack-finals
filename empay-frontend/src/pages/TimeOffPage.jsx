@@ -152,6 +152,7 @@ export default function TimeOffPage() {
   const [showApply, setShowApply] = useState(false);
   const [showAllocate, setShowAllocate] = useState(false);
   const [filter, setFilter] = useState('');
+  const [search, setSearch] = useState('');
   const [rejectId, setRejectId] = useState(null);
   const [rejectReason, setRejectReason] = useState('');
 
@@ -173,7 +174,16 @@ export default function TimeOffPage() {
     catch (err) { toast.error(err.message); }
   };
 
-  const filtered = filter ? requests.filter(r => r.status === filter) : requests;
+  const statusFiltered = filter ? requests.filter(r => r.status === filter) : requests;
+  const searchLower = search.toLowerCase().trim();
+  const filtered = (!isEmployee && searchLower)
+    ? statusFiltered.filter(r =>
+        `${r.first_name || ''} ${r.last_name || ''}`.toLowerCase().includes(searchLower) ||
+        (r.employee_code || '').toLowerCase().includes(searchLower) ||
+        (r.department || '').toLowerCase().includes(searchLower) ||
+        (r.leave_type || '').toLowerCase().includes(searchLower)
+      )
+    : statusFiltered;
 
   return (
     <div>
@@ -201,7 +211,7 @@ export default function TimeOffPage() {
       )}
 
       {/* Filters */}
-      <div className="filter-bar">
+      <div className="filter-bar" style={{ flexWrap: 'wrap', gap: 8 }}>
         <div className="tabs">
           {['','pending','approved','rejected'].map(s => (
             <button key={s} className={`tab${filter===s?' active':''}`} onClick={() => setFilter(s)}>
@@ -209,7 +219,32 @@ export default function TimeOffPage() {
             </button>
           ))}
         </div>
-        <span style={{ fontSize: 12, color: 'var(--text-3)', marginLeft: 'auto' }}>{filtered.length} requests</span>
+
+        {/* Search bar — admin/HR only */}
+        {!isEmployee && (
+          <div style={{ position: 'relative', marginLeft: 'auto' }}>
+            <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 14, color: 'var(--text-3)', pointerEvents: 'none' }}>🔍</span>
+            <input
+              type="text"
+              className="form-control"
+              style={{ paddingLeft: 32, width: 240 }}
+              placeholder="Search name, code, dept, type..."
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+            />
+            {search && (
+              <button
+                onClick={() => setSearch('')}
+                style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', fontSize: 14 }}
+              >✕</button>
+            )}
+          </div>
+        )}
+
+        <span style={{ fontSize: 12, color: 'var(--text-3)', ...(isEmployee ? { marginLeft: 'auto' } : {}) }}>
+          {filtered.length} request{filtered.length !== 1 ? 's' : ''}
+          {search && ` for "${search}"`}
+        </span>
       </div>
 
       {/* Requests table */}
@@ -226,7 +261,7 @@ export default function TimeOffPage() {
               </thead>
               <tbody>
                 {filtered.length === 0 ? (
-                  <tr><td colSpan={8} style={{ textAlign:'center', padding:40, color:'var(--text-3)' }}>No requests found</td></tr>
+                  <tr><td colSpan={8} style={{ textAlign:'center', padding:40, color:'var(--text-3)' }}>No requests found{search ? ` for "${search}"` : ''}</td></tr>
                 ) : filtered.map(r => (
                   <tr key={r.id}>
                     {!isEmployee && <td><div style={{ fontWeight:600 }}>{r.first_name} {r.last_name}</div><div style={{ fontSize:11,color:'var(--text-4)' }}>{r.employee_code}</div></td>}
