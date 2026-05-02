@@ -3,11 +3,38 @@ const bcrypt = require('bcryptjs');
 
 const LEAVE_TYPES = [['sick', 12], ['casual', 10], ['earned', 15]];
 
-// Generate next employee code safely (using MAX to avoid gaps causing duplicates)
+const COMPANY_PREFIX = 'EP'; // EmPay
+
+// Generate EMP001-style sequential code (for employee_code field)
 async function nextEmpCode(conn) {
   const [rows] = await conn.query(`SELECT MAX(CAST(SUBSTRING(employee_code, 4) AS UNSIGNED)) AS mx FROM employees`);
   const next = (rows[0].mx || 0) + 1;
   return `EMP${String(next).padStart(3, '0')}`;
+}
+
+/**
+ * Generate Login ID: [EP][XX][XX][YYYY][NNNN]
+ * EP   = Company prefix
+ * XX   = First 2 letters of first name (uppercase)
+ * XX   = First 2 letters of last name  (uppercase)
+ * YYYY = Year of joining
+ * NNNN = Serial number of joining in that year (per-year counter)
+ * Example: John Doe joining 2023 → EPJODO20230001
+ */
+async function generateLoginId(conn, firstName, lastName, dateOfJoining) {
+  const year = dateOfJoining
+    ? new Date(dateOfJoining).getFullYear()
+    : new Date().getFullYear();
+  const fn = (firstName || 'XX').substring(0, 2).toUpperCase();
+  const ln = (lastName  || 'XX').substring(0, 2).toUpperCase();
+
+  // Count how many employees already have a login_id for this year → gives serial position
+  const [rows] = await conn.query(
+    `SELECT COUNT(*) AS cnt FROM users WHERE login_id LIKE ?`,
+    [`${COMPANY_PREFIX}____${year}%`]
+  );
+  const serial = String((rows[0].cnt || 0) + 1).padStart(4, '0');
+  return `${COMPANY_PREFIX}${fn}${ln}${year}${serial}`;
 }
 
 // Compute salary components from total monthly wage
