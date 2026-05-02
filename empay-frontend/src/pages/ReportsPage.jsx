@@ -18,15 +18,17 @@ export default function ReportsPage() {
     try {
       if (tab === 'payroll') {
         const r = await api.get(`/payroll?month=${filters.month}&year=${filters.year}`);
-        setPayroll(r.data);
+        setPayroll(r.data || []);
       } else if (tab === 'timeoff') {
         const r = await api.get('/timeoff');
-        setTimeoff(r.data);
+        setTimeoff(r.data || []);
       } else {
         const r = await api.get(`/attendance?month=${filters.month}&year=${filters.year}`);
-        setAttendance(r.data);
+        setAttendance(r.data || []);
       }
-    } catch {} finally { setLoading(false); }
+    } catch (err) {
+      console.error("Error loading report data:", err);
+    } finally { setLoading(false); }
   };
   useEffect(() => { loadData(); }, [tab, filters]);
 
