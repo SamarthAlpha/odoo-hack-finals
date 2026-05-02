@@ -19,8 +19,8 @@ async function seedAttendance() {
     let status, checkIn = null, checkOut = null;
 
     // Distribute statuses: present, present+out, on_leave, absent
-    if (i % 4 === 0) { status = 'present'; checkIn = '09:05:00'; }
-    else if (i % 4 === 1) { status = 'present'; checkIn = '08:55:00'; checkOut = '17:30:00'; }
+    if (i % 4 === 0) { status = 'present'; checkIn = `${today} 09:05:00`; }
+    else if (i % 4 === 1) { status = 'present'; checkIn = `${today} 08:55:00`; checkOut = `${today} 17:30:00`; }
     else if (i % 4 === 2) { status = 'on_leave'; }
     else { status = 'absent'; }
 
