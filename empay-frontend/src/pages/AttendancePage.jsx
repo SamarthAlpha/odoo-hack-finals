@@ -17,20 +17,32 @@ export default function AttendancePage() {
   const [actionLoading, setActionLoading] = useState(false);
   const [filters, setFilters] = useState({ month: new Date().getMonth() + 1, year: new Date().getFullYear(), employee_id: '' });
   const [employees, setEmployees] = useState([]);
-  const now = new Date();
+  const [now, setNow] = useState(new Date());
 
-  const loadToday = () => api.get('/attendance/today-status').then(r => setTodayStatus(r.data));
+  // Live clock
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  const loadToday = () => api.get('/attendance/today-status').then(r => setTodayStatus(r));
   const loadLogs = () => {
     setLoading(true);
     const ep = isEmployee
       ? `/attendance/my?month=${filters.month}&year=${filters.year}`
       : `/attendance?month=${filters.month}&year=${filters.year}${filters.employee_id ? `&employee_id=${filters.employee_id}` : ''}`;
-    api.get(ep).then(r => setLogs(r.data)).catch(() => {}).finally(() => setLoading(false));
+    api.get(ep).then(r => setLogs(Array.isArray(r) ? r : r || [])).catch(() => {}).finally(() => setLoading(false));
   };
 
   useEffect(() => {
-    if (isEmployee) loadToday();
-    else api.get('/employees').then(r => setEmployees(r.data)).catch(() => {});
+    if (isEmployee) {
+      loadToday();
+      // Poll today status every 30s for real-time update
+      const t = setInterval(loadToday, 30000);
+      return () => clearInterval(t);
+    } else {
+      api.get('/employees').then(r => setEmployees(Array.isArray(r) ? r : r || []));
+    }
   }, []);
   useEffect(() => { loadLogs(); }, [filters]);
 
@@ -42,7 +54,12 @@ export default function AttendancePage() {
   };
   const checkOut = async () => {
     setActionLoading(true);
-    try { const r = await api.post('/attendance/checkout', {}); toast.success(`✅ Checked out! ${r.total_hours}h worked`); loadToday(); loadLogs(); }
+    try {
+      const r = await api.post('/attendance/checkout', {});
+      const hours = r?.total_hours || r?.data?.total_hours || '';
+      toast.success(`✅ Checked out!${hours ? ` ${hours}h worked` : ''}`);
+      loadToday(); loadLogs();
+    }
     catch (err) { toast.error(err.message); }
     finally { setActionLoading(false); }
   };

@@ -185,9 +185,16 @@ export default function EmployeesPage() {
 
   const load = () => {
     setLoading(true);
-    api.get('/employees').then(r => setEmployees(r.data||r)).catch(()=>{}).finally(()=>setLoading(false));
+    api.get('/employees').then(r => setEmployees(Array.isArray(r) ? r : r || [])).catch(()=>{}).finally(()=>setLoading(false));
   };
-  useEffect(()=>{ load(); },[]);
+  useEffect(() => {
+    load();
+    // Real-time: refresh every 30s so status dots update when employees check in/out
+    const interval = setInterval(() => {
+      api.get('/employees').then(r => setEmployees(Array.isArray(r) ? r : r || [])).catch(()=>{});
+    }, 30000);
+    return () => clearInterval(interval);
+  }, []);
 
   const depts = [...new Set(employees.map(e=>e.department).filter(Boolean))];
   const filtered = employees.filter(e=>{

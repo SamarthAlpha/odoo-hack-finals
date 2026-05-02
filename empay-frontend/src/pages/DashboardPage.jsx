@@ -16,7 +16,11 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    api.get('/dashboard/stats').then(r => setStats(r.data)).catch(() => {}).finally(() => setLoading(false));
+    const load = () => api.get('/dashboard/stats').then(r => setStats(r)).catch(() => {}).finally(() => setLoading(false));
+    load();
+    // Real-time: refresh dashboard every 30 seconds
+    const interval = setInterval(load, 30000);
+    return () => clearInterval(interval);
   }, []);
 
   if (loading) return <div className="page-loader" style={{ height: '60vh', background: 'transparent' }}><div className="spinner" /></div>;
