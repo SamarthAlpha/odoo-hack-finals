@@ -29,13 +29,50 @@ function BarChart({ data, vk, lk, color, title }) {
 }
 
 function GenerateModal({ employees, onClose, onDone }) {
-  const [form, setForm] = useState({ month: new Date().getMonth() + 1, year: new Date().getFullYear(), employee_ids: [] });
+  const [form, setForm] = useState({ month: new Date().getMonth() + 1, year: new Date().getFullYear() });
   const [loading, setLoading] = useState(false);
-  const run = async e => {
-    e.preventDefault(); setLoading(true);
-    try { const r = await api.post('/payroll/generate', form); toast.success(`Generated for ${r?.length || 0} employees`); onDone(); }
-    catch(err) { toast.error(err.message); } finally { setLoading(false); }
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [departmentFilter, setDepartmentFilter] = useState('');
+  const [roleFilter, setRoleFilter] = useState('');
+
+  const departments = [...new Set(employees.map(e => e.department).filter(Boolean))];
+  const roles = [...new Set(employees.map(e => e.role).filter(Boolean))];
+
+  const filteredEmployees = employees.filter(e => {
+    const matchesSearch = `${e.first_name} ${e.last_name} ${e.employee_code}`.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesDept = !departmentFilter || e.department === departmentFilter;
+    const matchesRole = !roleFilter || e.role === roleFilter;
+    return matchesSearch && matchesDept && matchesRole;
+  });
+
+  const handleSelect = (id) => {
+    setSelectedIds(prev =>
+      prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
+    );
   };
+
+  const handleSelectAll = () => {
+    if (selectedIds.length === filteredEmployees.length) {
+      setSelectedIds([]);
+    } else {
+      setSelectedIds(filteredEmployees.map(e => e.id));
+    }
+  };
+
+  const run = async e => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      const payload = { ...form, employee_ids: selectedIds };
+      const r = await api.post('/payroll/generate', payload);
+      toast.success(`Generated for ${r?.data?.length || 0} employees`);
+      onDone();
+    }
+    catch(err) { toast.error(err.message); }
+    finally { setLoading(false); }
+  };
+
   return (
     <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
       <div className="modal">
@@ -56,11 +93,61 @@ function GenerateModal({ employees, onClose, onDone }) {
               </div>
             </div>
             <div className="form-group">
-              <label className="form-label">Employees (blank = all)</label>
-              <select className="form-control" multiple size={5} onChange={e => setForm(p => ({ ...p, employee_ids: [...e.target.selectedOptions].map(o => +o.value) }))}>
-                {employees.map(e => <option key={e.id} value={e.id}>{e.first_name} {e.last_name} — {e.employee_code}</option>)}
-              </select>
-              <div className="form-error">Hold Ctrl/Cmd to select multiple. Leave empty for all.</div>
+              <label className="form-label">Employees ({selectedIds.length} selected)</label>
+              <div className="form-row" style={{ marginBottom: 8 }}>
+                <div className="form-group">
+                  <select className="form-control" value={departmentFilter} onChange={e => setDepartmentFilter(e.target.value)}>
+                    <option value="">All Departments</option>
+                    {departments.map(d => <option key={d} value={d}>{d}</option>)}
+                  </select>
+                </div>
+                <div className="form-group">
+                  <select className="form-control" value={roleFilter} onChange={e => setRoleFilter(e.target.value)}>
+                    <option value="">All Roles</option>
+                    {roles.map(r => <option key={r} value={r}>{r}</option>)}
+                  </select>
+                </div>
+              </div>
+              <input
+                type="text"
+                className="form-control"
+                placeholder="Search name or code..."
+                value={searchTerm}
+                onChange={e => setSearchTerm(e.target.value)}
+                style={{ marginBottom: 8 }}
+              />
+              <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius)', maxHeight: 300, overflowY: 'auto' }}>
+                <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--border)', background: 'var(--surface-2)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <input
+                    type="checkbox"
+                    checked={filteredEmployees.length > 0 && selectedIds.length === filteredEmployees.length}
+                    onChange={handleSelectAll}
+                    style={{ transform: 'scale(1.1)' }}
+                  />
+                  <label style={{ fontWeight: 600, fontSize: 12 }}>Select All (Filtered)</label>
+                </div>
+                {filteredEmployees.map(e => (
+                  <div key={e.id} onClick={() => handleSelect(e.id)} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', cursor: 'pointer', borderBottom: '1px solid var(--border-light)' }}
+                    onMouseEnter={ev => ev.currentTarget.style.background = 'var(--surface-2)'}
+                    onMouseLeave={ev => ev.currentTarget.style.background = 'none'}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.includes(e.id)}
+                      readOnly
+                      style={{ pointerEvents: 'none' }}
+                    />
+                    <div>
+                      <div style={{ fontWeight: 500, fontSize: 13 }}>{e.first_name} {e.last_name}</div>
+                      <div style={{ fontSize: 11, color: 'var(--text-3)' }}>{e.employee_code}</div>
+                    </div>
+                  </div>
+                ))}
+                {filteredEmployees.length === 0 && (
+                  <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-3)', fontSize: 13 }}>No employees found.</div>
+                )}
+              </div>
+              <div className="form-error">Leave selection empty to run for all employees.</div>
             </div>
           </div>
           <div className="modal-footer">
