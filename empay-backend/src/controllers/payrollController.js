@@ -128,7 +128,7 @@ const getAll = async (req, res) => {
     }
     query += ` ORDER BY p.pay_period_year DESC, p.pay_period_month DESC, e.employee_code`;
     const [rows] = await db.execute(query, params);
-    res.json(rows);
+    res.json({ success: true, data: rows });
   } catch (err) {
     res.status(500).json({ success: false, message: 'Server error' });
   }
