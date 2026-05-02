@@ -29,26 +29,24 @@ export default function AttendancePage() {
   const loadToday = () => api.get('/attendance/today-status').then(r => setTodayStatus(r));
   const loadLogs = () => {
     setLoading(true);
-    // When a specific date is selected, use it; otherwise use month+year
-    const dateParam = filters.date ? `&date=${filters.date}` : `&month=${filters.month}&year=${filters.year}`;
+    const dateParam = filters.date ? `date=${filters.date}` : `month=${filters.month}&year=${filters.year}`;
     const empParam = (!isEmployee && filters.employee_id) ? `&employee_id=${filters.employee_id}` : '';
-    const ep = isEmployee
-      ? `/attendance/my?${filters.date ? `date=${filters.date}` : `month=${filters.month}&year=${filters.year}`}`
-      : `/attendance?${filters.date ? `date=${filters.date}` : `month=${filters.month}&year=${filters.year}`}${empParam}`;
-    api.get(ep).then(r => setLogs(Array.isArray(r) ? r : r || [])).catch(() => {}).finally(() => setLoading(false));
+    const ep = isEmployee ? `/attendance/my?${dateParam}` : `/attendance?${dateParam}${empParam}`;
+    api.get(ep)
+       .then(r => setLogs(Array.isArray(r) ? r : (r?.data || [])))
+       .catch(() => setLogs([]))
+       .finally(() => setLoading(false));
   };
 
   useEffect(() => {
-    if (isEmployee) {
-      loadToday();
-      // Poll today status every 30s for real-time update
-      const t = setInterval(loadToday, 30000);
-      return () => clearInterval(t);
-    } else {
-      api.get('/employees').then(r => setEmployees(Array.isArray(r) ? r : r || []));
+    if (!isEmployee) {
+      api.get('/employees').then(r => setEmployees(Array.isArray(r) ? r : []));
     }
-  }, []);
-  useEffect(() => { loadLogs(); }, [filters]);
+  }, [isEmployee]);
+
+  useEffect(() => {
+    loadLogs();
+  }, [filters, isEmployee]);
 
   const checkIn = async () => {
     setActionLoading(true);

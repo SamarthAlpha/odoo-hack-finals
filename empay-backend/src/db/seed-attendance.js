@@ -16,20 +16,52 @@ async function seedAttendance() {
 
   for (let i = 0; i < emps.length; i++) {
     const emp = emps[i];
-    let status, checkIn = null, checkOut = null;
+    let status, checkIn = null, checkOut = null, totalHours = 0;
 
     // Distribute statuses: present, present+out, on_leave, absent
-    if (i % 4 === 0) { status = 'present'; checkIn = `${today} 09:05:00`; }
-    else if (i % 4 === 1) { status = 'present'; checkIn = `${today} 08:55:00`; checkOut = `${today} 17:30:00`; }
-    else if (i % 4 === 2) { status = 'on_leave'; }
-    else { status = 'absent'; }
+    if (i % 4 === 0) { 
+        status = 'half_day'; 
+        checkIn = `${today} 09:05:00`; 
+        totalHours = 0; // Check-in only, no checkout yet
+    }
+    else if (i % 4 === 1) { 
+        status = 'present'; 
+        checkIn = `${today} 08:55:00`; 
+        checkOut = `${today} 17:30:00`; 
+        totalHours = 8.58; 
+    }
+    else if (i % 4 === 2) { 
+        status = 'on_leave'; 
+    }
+    else { 
+        status = 'absent'; 
+    }
 
+    // Insert summary
     await conn.query(
-      `INSERT INTO attendance (employee_id, date, status, check_in, check_out)
-       VALUES (?, ?, ?, ?, ?)
-       ON DUPLICATE KEY UPDATE status=VALUES(status), check_in=VALUES(check_in), check_out=VALUES(check_out)`,
-      [emp.id, today, status, checkIn, checkOut]
+      `INSERT INTO attendance_summary (employee_id, date, status, total_hours)
+       VALUES (?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE status=VALUES(status), total_hours=VALUES(total_hours)`,
+      [emp.id, today, status, totalHours]
     );
+
+    // Clear old events for this employee today
+    await conn.query(`DELETE FROM attendance_events WHERE employee_id=? AND DATE(timestamp)=?`, [emp.id, today]);
+
+    // Insert events
+    if (checkIn) {
+        await conn.query(
+            `INSERT INTO attendance_events (employee_id, timestamp, event_type) VALUES (?, ?, 'check_in')`,
+            [emp.id, checkIn]
+        );
+    }
+    if (checkOut) {
+        await conn.query(
+            `INSERT INTO attendance_events (employee_id, timestamp, event_type) VALUES (?, ?, 'check_out')`,
+            [emp.id, checkOut]
+        );
+    }
+
     console.log(`  ${emp.employee_code} → ${status}`);
   }
 

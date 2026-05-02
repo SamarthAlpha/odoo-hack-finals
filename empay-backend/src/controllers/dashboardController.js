@@ -8,13 +8,13 @@ const getStats = async (req, res) => {
 
     const [[{ total_employees }]] = await db.execute(`SELECT COUNT(*) as total_employees FROM employees WHERE status='active'`);
     const [[{ present_today }]] = await db.execute(
-      `SELECT COUNT(*) as present_today FROM attendance WHERE date = ? AND status = 'present'`, [today]
+      `SELECT COUNT(*) as present_today FROM attendance_summary WHERE date = ? AND status = 'present'`, [today]
     );
     const [[{ on_leave_today }]] = await db.execute(
-      `SELECT COUNT(*) as on_leave_today FROM attendance WHERE date = ? AND status = 'on_leave'`, [today]
+      `SELECT COUNT(*) as on_leave_today FROM attendance_summary WHERE date = ? AND status = 'on_leave'`, [today]
     );
     const [[{ absent_today }]] = await db.execute(
-      `SELECT COUNT(*) as absent_today FROM attendance WHERE date = ? AND status IN ('absent','half_day')`, [today]
+      `SELECT COUNT(*) as absent_today FROM attendance_summary WHERE date = ? AND status IN ('absent','half_day')`, [today]
     );
     const [[{ pending_leaves }]] = await db.execute(
       `SELECT COUNT(*) as pending_leaves FROM time_off_requests WHERE status = 'pending'`
@@ -36,7 +36,7 @@ const getStats = async (req, res) => {
               SUM(CASE WHEN status='present' THEN 1 ELSE 0 END) as present_count,
               SUM(CASE WHEN status='absent' THEN 1 ELSE 0 END) as absent_count,
               SUM(CASE WHEN status='half_day' THEN 1 ELSE 0 END) as half_day_count
-       FROM attendance
+       FROM attendance_summary
        WHERE date >= DATE_SUB(CURDATE(), INTERVAL 6 MONTH)
        GROUP BY YEAR(date), MONTH(date)
        ORDER BY year, month`

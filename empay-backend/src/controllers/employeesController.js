@@ -55,11 +55,11 @@ const getAll = async (req, res) => {
   try {
     // Employees only see themselves; admins/HR see all non-admin employees
     let query = `SELECT e.id, e.employee_code, e.first_name, e.last_name, e.department, e.designation, e.phone, e.location,
-                        u.email, u.role, u.is_active,
-        (SELECT status FROM attendance WHERE employee_id = e.id AND date = CURDATE() LIMIT 1) AS today_attendance,
+                        e.status, u.email, u.role, u.is_active, u.login_id,
+        (SELECT status FROM attendance_summary WHERE employee_id = e.id AND date = CURDATE() LIMIT 1) AS today_attendance,
         (SELECT 1 FROM time_off_requests WHERE employee_id = e.id AND status='approved' AND CURDATE() BETWEEN start_date AND end_date LIMIT 1) AS on_leave_today
        FROM employees e JOIN users u ON u.id = e.user_id
-       WHERE u.role != 'admin'`;
+       WHERE 1=1`;
     const params = [];
 
     if (req.user.role === 'employee') {

@@ -53,10 +53,10 @@ const generate = async (req, res) => {
       if (day !== 0 && day !== 6) workingDays++;
     }
 
-    let empQuery = `SELECT * FROM employees WHERE status = 'active'`;
+    let empQuery = `SELECT e.* FROM employees e JOIN users u ON e.user_id = u.id WHERE e.status = 'active' AND u.role = 'employee'`;
     const params = [];
     if (employee_ids && employee_ids.length > 0) {
-      empQuery += ` AND id IN (${employee_ids.map(() => '?').join(',')})`;
+      empQuery += ` AND e.id IN (${employee_ids.map(() => '?').join(',')})`;
       params.push(...employee_ids);
     }
     const [employees] = await db.execute(empQuery, params);
@@ -64,7 +64,7 @@ const generate = async (req, res) => {
 
     for (const emp of employees) {
       const [attRows] = await db.execute(
-        `SELECT status, COUNT(*) as cnt FROM attendance WHERE employee_id=? AND MONTH(date)=? AND YEAR(date)=? GROUP BY status`,
+        `SELECT status, COUNT(*) as cnt FROM attendance_summary WHERE employee_id=? AND MONTH(date)=? AND YEAR(date)=? GROUP BY status`,
         [emp.id, month, year]
       );
       let daysWorked = 0;
@@ -117,7 +117,7 @@ const getAll = async (req, res) => {
                         e.pan_number, e.uan_number, e.bank_account, e.bank_name, e.wage, u.email
                  FROM payroll p
                  JOIN employees e ON e.id = p.employee_id
-                 JOIN users u ON u.id = e.user_id WHERE 1=1`;
+                 JOIN users u ON u.id = e.user_id WHERE u.role = 'employee'`;
     const params = [];
     if (month) { query += ` AND p.pay_period_month=?`; params.push(month); }
     if (year)  { query += ` AND p.pay_period_year=?`;  params.push(year); }

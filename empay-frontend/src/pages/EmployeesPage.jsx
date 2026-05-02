@@ -21,7 +21,7 @@ function StatusDot({ emp }) {
       }}>✈️</span>
     );
   }
-  if (emp.today_attendance === 'present') {
+  if (emp.today_attendance === 'present' || emp.today_attendance === 'half_day') {
     return (
       <span title="Present" style={{
         position:'absolute', top:14, right:14, width:12, height:12, borderRadius:'50%',
@@ -280,7 +280,7 @@ export default function EmployeesPage() {
                         <div style={{display:'flex',alignItems:'center',gap:10}}>
                           <div style={{position:'relative'}}>
                             <div className="avatar avatar-sm" style={{background:color,color:'#fff'}}>{getInitials(emp.first_name,emp.last_name)}</div>
-                            <span style={{position:'absolute',bottom:-2,right:-2,width:9,height:9,borderRadius:'50%',background:emp.on_leave_today?'#3b82f6':emp.today_attendance==='present'?'#22c55e':'#eab308',border:'1.5px solid #fff'}}/>
+                            <span style={{position:'absolute',bottom:-2,right:-2,width:9,height:9,borderRadius:'50%',background:emp.on_leave_today?'#3b82f6':(emp.today_attendance==='present'||emp.today_attendance==='half_day')?'#22c55e':'#eab308',border:'1.5px solid #fff'}}/>
                           </div>
                           <div><div style={{fontWeight:600}}>{emp.first_name} {emp.last_name}</div><div style={{fontSize:11,color:'var(--text-4)'}}>{emp.employee_code}</div></div>
                         </div>

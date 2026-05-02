@@ -18,7 +18,7 @@ export default function MyProfilePage() {
   const [showPw, setShowPw] = useState(false);
 
   useEffect(() => {
-    api.get('/auth/me').then(r => setProfile(r.data)).catch(() => {}).finally(() => setLoading(false));
+    api.get('/auth/me').then(r => setProfile(r)).catch(() => {}).finally(() => setLoading(false));
   }, []);
 
   const changePw = async (e) => {
