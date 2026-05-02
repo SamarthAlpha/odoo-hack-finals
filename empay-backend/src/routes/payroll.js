@@ -12,5 +12,6 @@ router.post('/generate', ctrl.generate);
 router.post('/validate', ctrl.validatePayrun);
 router.get('/payslip/:id', ctrl.getPayslip);
 router.put('/:id', ctrl.update);
+router.get('/statement', ctrl.getStatement);
 
 module.exports = router;

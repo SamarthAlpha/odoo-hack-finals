@@ -222,4 +222,42 @@ const getDashboardStats = async (req, res) => {
   }
 };
 
-module.exports = { generate, getAll, getPayslip, update, validatePayrun, getDashboardStats };
+// Get salary statement for a year
+const getStatement = async (req, res) => {
+  try {
+    const { employee_id, year } = req.query;
+    if (!employee_id || !year) return res.status(400).json({ success: false, message: 'Employee and year required' });
+
+    const [empRows] = await db.execute(`SELECT * FROM employees WHERE id = ?`, [employee_id]);
+    if (!empRows.length) return res.status(404).json({ success: false, message: 'Employee not found' });
+
+    const [payRows] = await db.execute(
+      `SELECT * FROM payroll WHERE employee_id = ? AND pay_period_year = ? ORDER BY pay_period_month`,
+      [employee_id, year]
+    );
+
+    // Create a full 12-month structure, filling in data where it exists
+    const monthlyData = Array.from({ length: 12 }, (_, i) => {
+      const month = i + 1;
+      const payData = payRows.find(p => p.pay_period_month === month);
+      return payData || {
+        pay_period_month: month,
+        basic_salary: 0, hra: 0, standard_allowance: 0, performance_bonus: 0, lta: 0, fixed_allowance: 0,
+        gross_earnings: 0, pf_employee: 0, professional_tax: 0, total_deductions: 0, net_pay: 0,
+      };
+    });
+
+    res.json({
+      success: true,
+      data: {
+        employee: empRows[0],
+        monthly_data: monthlyData,
+      }
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+module.exports = { generate, getAll, getPayslip, update, validatePayrun, getDashboardStats, getStatement };

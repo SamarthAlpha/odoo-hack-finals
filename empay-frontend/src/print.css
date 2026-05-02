@@ -1,0 +1,94 @@
+/* empay-frontend/src/print.css */
+
+@media print {
+  /* Hide everything on the page by default */
+  body * {
+    visibility: hidden;
+  }
+
+  /* Make the printable container and its children visible */
+  #printable-statement, #printable-statement * {
+    visibility: visible;
+  }
+
+  /* Position the printable container to take up the whole page */
+  #printable-statement {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    padding: 20px;
+    font-family: Arial, sans-serif;
+  }
+
+  /* General styling for the report */
+  .print-header {
+    text-align: center;
+    margin-bottom: 30px;
+  }
+  .print-header h1 {
+    margin: 0;
+    font-size: 24px;
+    color: #333;
+  }
+  .print-header p {
+    margin: 5px 0 0;
+    font-size: 14px;
+    color: #555;
+  }
+
+  .employee-details {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 20px;
+    font-size: 12px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #ccc;
+  }
+
+  .data-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+
+  .data-table th,
+  .data-table td {
+    border: 1px solid #eee;
+    padding: 8px;
+    text-align: left;
+  }
+
+  .data-table th {
+    background-color: #f9f9f9;
+    font-weight: bold;
+  }
+
+  .data-table .section-header td {
+    font-weight: bold;
+    background-color: #f2f2f2;
+    color: #d35400; /* A reddish-brown for earnings/deductions */
+    font-size: 14px;
+  }
+
+  .data-table .total-row td {
+    font-weight: bold;
+    background-color: #eaf2f8; /* A light blue for totals */
+  }
+
+  .data-table .net-salary-row td {
+    font-weight: bold;
+    font-size: 14px;
+    background-color: #e8f6f3; /* A light green for net salary */
+    border-top: 2px solid #16a085;
+  }
+
+  .text-right {
+    text-align: right !important;
+  }
+
+  /* Hide the print button in the print view */
+  .no-print {
+    display: none !important;
+  }
+}
