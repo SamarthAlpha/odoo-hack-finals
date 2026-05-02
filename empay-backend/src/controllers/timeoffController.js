@@ -1,4 +1,5 @@
 const db = require('../db/connection');
+const path = require('path');
 
 // Calculate business days between two dates
 const calcBusinessDays = (start, end) => {
@@ -20,7 +21,14 @@ const apply = async (req, res) => {
     if (!empId) return res.status(400).json({ success: false, message: 'No employee profile found' });
 
     const { leave_type, start_date, end_date, reason } = req.body;
+
+    // Sick leave requires a document
+    if (leave_type === 'sick' && !req.file) {
+      return res.status(400).json({ success: false, message: 'A supporting document is required for sick leave' });
+    }
+
     const totalDays = calcBusinessDays(start_date, end_date);
+    const documentPath = req.file ? req.file.filename : null;
 
     // Check leave balance
     const year = new Date(start_date).getFullYear();
@@ -37,9 +45,9 @@ const apply = async (req, res) => {
     }
 
     const [result] = await db.execute(
-      `INSERT INTO time_off_requests (employee_id, leave_type, start_date, end_date, total_days, reason)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [empId, leave_type, start_date, end_date, totalDays, reason]
+      `INSERT INTO time_off_requests (employee_id, leave_type, start_date, end_date, total_days, reason, document_path)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [empId, leave_type, start_date, end_date, totalDays, reason, documentPath]
     );
     res.status(201).json({ success: true, message: 'Time off request submitted', id: result.insertId });
   } catch (err) {

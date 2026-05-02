@@ -28,6 +28,10 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Serve uploaded documents (timeoff, etc.)
+const path = require('path');
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({ success: true, message: 'EmPay API is running 🚀', timestamp: new Date().toISOString() });

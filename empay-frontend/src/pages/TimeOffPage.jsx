@@ -9,13 +9,35 @@ const LEAVE_TYPES = ['sick','casual','earned','maternity','paternity','unpaid'];
 
 function ApplyModal({ onClose, onSave }) {
   const [form, setForm] = useState({ leave_type: 'casual', start_date: '', end_date: '', reason: '' });
+  const [docFile, setDocFile] = useState(null);
   const [loading, setLoading] = useState(false);
+  const isSick = form.leave_type === 'sick';
+
   const save = async (e) => {
-    e.preventDefault(); setLoading(true);
-    try { await api.post('/timeoff/apply', form); toast.success('Leave request submitted!'); onSave(); }
-    catch (err) { toast.error(err.message); }
+    e.preventDefault();
+    if (isSick && !docFile) { toast.error('Please upload a supporting document for sick leave'); return; }
+    setLoading(true);
+    try {
+      const fd = new FormData();
+      fd.append('leave_type', form.leave_type);
+      fd.append('start_date', form.start_date);
+      fd.append('end_date', form.end_date);
+      fd.append('reason', form.reason);
+      if (docFile) fd.append('document', docFile);
+
+      const token = localStorage.getItem('empay_token') || '';
+      const res = await fetch('/api/timeoff/apply', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: fd,
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.message || 'Failed');
+      toast.success('Leave request submitted!'); onSave();
+    } catch (err) { toast.error(err.message); }
     finally { setLoading(false); }
   };
+
   return (
     <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
       <div className="modal">
@@ -33,6 +55,39 @@ function ApplyModal({ onClose, onSave }) {
               <div className="form-group"><label className="form-label">End Date</label><input className="form-control" type="date" value={form.end_date} min={form.start_date} onChange={e=>setForm(p=>({...p,end_date:e.target.value}))} required /></div>
             </div>
             <div className="form-group"><label className="form-label">Reason</label><textarea className="form-control" value={form.reason} onChange={e=>setForm(p=>({...p,reason:e.target.value}))} placeholder="Briefly describe the reason..." required /></div>
+
+            {/* Document upload */}
+            <div className="form-group">
+              <label className="form-label">
+                Supporting Document
+                {isSick
+                  ? <span style={{color:'var(--danger)',marginLeft:4}}>* (Required for Sick Leave)</span>
+                  : <span style={{color:'var(--text-3)',marginLeft:4,fontSize:11}}>(Optional)</span>
+                }
+              </label>
+              <div style={{
+                border: `2px dashed ${isSick && !docFile ? 'var(--danger)' : 'var(--border)'}`,
+                borderRadius: 'var(--radius)', padding: '14px 16px',
+                background: 'var(--surface)', transition: 'border-color 0.2s',
+              }}>
+                <input
+                  type="file"
+                  id="timeoff-doc"
+                  accept=".jpg,.jpeg,.png,.gif,.pdf,.doc,.docx"
+                  style={{ display: 'none' }}
+                  onChange={e => setDocFile(e.target.files[0] || null)}
+                />
+                <label htmlFor="timeoff-doc" style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span style={{ fontSize: 24 }}>📎</span>
+                  <div>
+                    {docFile
+                      ? <><div style={{ fontWeight: 600, fontSize: 13, color: 'var(--primary)' }}>✓ {docFile.name}</div><div style={{ fontSize: 11, color: 'var(--text-3)' }}>{(docFile.size/1024).toFixed(1)} KB — click to change</div></>
+                      : <><div style={{ fontWeight: 500, fontSize: 13 }}>Click to upload file</div><div style={{ fontSize: 11, color: 'var(--text-3)' }}>JPG, PNG, PDF, DOC — max 5 MB</div></>
+                    }
+                  </div>
+                </label>
+              </div>
+            </div>
           </div>
           <div className="modal-footer">
             <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
@@ -165,7 +220,7 @@ export default function TimeOffPage() {
               <thead>
                 <tr>
                   {!isEmployee && <th>Employee</th>}
-                  <th>Type</th><th>From</th><th>To</th><th>Days</th><th>Reason</th><th>Status</th>
+                  <th>Type</th><th>From</th><th>To</th><th>Days</th><th>Reason</th><th>Status</th><th>Document</th>
                   {can('admin','payroll_officer') && <th>Actions</th>}
                 </tr>
               </thead>
@@ -181,6 +236,16 @@ export default function TimeOffPage() {
                     <td style={{ fontWeight:600 }}>{r.total_days}</td>
                     <td style={{ maxWidth:180, color:'var(--text-3)', fontSize:12 }}>{r.reason}</td>
                     <td><span className={`badge ${STATUS_BADGE[r.status]||'badge-default'}`}>{r.status}</span></td>
+                    <td>
+                      {r.document_path
+                        ? <a href={`http://localhost:5001/uploads/timeoff/${r.document_path}`} target="_blank" rel="noopener noreferrer"
+                            style={{ display:'inline-flex', alignItems:'center', gap:4, fontSize:12, color:'var(--primary)', fontWeight:600, textDecoration:'none',
+                                     padding:'4px 10px', border:'1px solid var(--primary-light)', borderRadius:99, background:'var(--primary-xlight)' }}>
+                            📎 View Doc
+                          </a>
+                        : <span style={{ fontSize:11, color:'var(--text-4)' }}>—</span>
+                      }
+                    </td>
                     {can('admin','payroll_officer') && (
                       <td>
                         {r.status === 'pending' && (
