@@ -54,7 +54,8 @@ function computeSalaryComponents(wage) {
 const getAll = async (req, res) => {
   try {
     // Employees only see themselves; admins/HR see all non-admin employees
-    let query = `SELECT e.*, u.email, u.role, u.is_active, u.login_id,
+    let query = `SELECT e.id, e.employee_code, e.first_name, e.last_name, e.department, e.designation, e.phone, e.location,
+                        u.email, u.role, u.is_active,
         (SELECT status FROM attendance WHERE employee_id = e.id AND date = CURDATE() LIMIT 1) AS today_attendance,
         (SELECT 1 FROM time_off_requests WHERE employee_id = e.id AND status='approved' AND CURDATE() BETWEEN start_date AND end_date LIMIT 1) AS on_leave_today
        FROM employees e JOIN users u ON u.id = e.user_id
@@ -62,14 +63,15 @@ const getAll = async (req, res) => {
     const params = [];
 
     if (req.user.role === 'employee') {
-      // Employees can only see their own record in this list
-      query += ` AND e.user_id = ?`;
-      params.push(req.user.id);
+      // Employees can see all other employees' basic details
+      // but not their own in this list (to avoid duplication on profile page)
+      // query += ` AND e.user_id != ?`;
+      // params.push(req.user.id);
     }
     query += ` ORDER BY e.employee_code`;
 
     const [rows] = await db.execute(query, params);
-    res.json(rows);
+    res.json({ success: true, data: rows });
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false, message: 'Server error' });
@@ -79,23 +81,27 @@ const getAll = async (req, res) => {
 // GET single employee
 const getOne = async (req, res) => {
   try {
-    // Employees can only view their own profile
-    if (req.user.role === 'employee') {
-      const [check] = await db.execute(`SELECT user_id FROM employees WHERE id = ?`, [req.params.id]);
-      if (!check.length || check[0].user_id !== req.user.id) {
-        return res.status(403).json({ success: false, message: 'Access denied: you can only view your own profile' });
-      }
+    const isOwnProfile = req.user.role === 'employee' && (await db.execute(`SELECT user_id FROM employees WHERE id = ?`, [req.params.id]))[0][0]?.user_id === req.user.id;
+
+    let query;
+    if (req.user.role === 'admin' || req.user.role === 'hr' || isOwnProfile) {
+      // Full access for admin, HR, or when viewing own profile
+      query = `SELECT e.*, u.email, u.role, u.is_active, u.login_id,
+                      m.first_name AS manager_first_name, m.last_name AS manager_last_name
+               FROM employees e
+               JOIN users u ON u.id = e.user_id
+               LEFT JOIN employees m ON m.id = e.manager_id
+               WHERE e.id = ?`;
+    } else {
+      // Limited access for employees viewing other profiles
+      query = `SELECT e.id, e.employee_code, e.first_name, e.last_name, e.department, e.designation, e.phone, e.location,
+                      u.email, u.role, u.is_active
+               FROM employees e
+               JOIN users u ON u.id = e.user_id
+               WHERE e.id = ? AND u.role != 'admin'`;
     }
 
-    const [rows] = await db.execute(
-      `SELECT e.*, u.email, u.role, u.is_active, u.login_id,
-              m.first_name AS manager_first_name, m.last_name AS manager_last_name
-       FROM employees e
-       JOIN users u ON u.id = e.user_id
-       LEFT JOIN employees m ON m.id = e.manager_id
-       WHERE e.id = ?`,
-      [req.params.id]
-    );
+    const [rows] = await db.execute(query, [req.params.id]);
     if (!rows.length) return res.status(404).json({ success: false, message: 'Not found' });
     res.json(rows[0]);
   } catch (err) {
