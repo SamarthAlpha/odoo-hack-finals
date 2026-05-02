@@ -122,7 +122,7 @@ const approve = async (req, res) => {
     while (cur <= endDate) {
       const dateStr = cur.toISOString().split('T')[0];
       await db.execute(
-        `INSERT INTO attendance (employee_id, date, status) VALUES (?, ?, 'on_leave')
+        `INSERT INTO attendance_summary (employee_id, date, status) VALUES (?, ?, 'on_leave')
          ON DUPLICATE KEY UPDATE status='on_leave'`,
         [tor.employee_id, dateStr]
       );

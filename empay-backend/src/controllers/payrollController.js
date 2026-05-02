@@ -1,36 +1,46 @@
+
 const db = require('../db/connection');
 
-// Proper salary formula from total monthly wage
+// Proper salary formula from employee stored parameters
 function calcComponents(emp, ratio) {
-  const wage     = parseFloat(emp.wage) || parseFloat(emp.basic_salary) || 0;
-  const pfRate   = parseFloat(emp.pf_rate) || 12;
-  const profTax  = parseFloat(emp.prof_tax_amount) || 200;
+  const wage = parseFloat(emp.wage) || 0;
+  const bp = parseFloat(emp.basic_pct) || 50;
+  const hp = parseFloat(emp.hra_pct) || 50;
+  const sp = parseFloat(emp.standard_allowance_pct) || 0;
+  const pp = parseFloat(emp.perf_pct) || 8.33;
+  const lp = parseFloat(emp.lta_pct) || 8.33;
+  const ep = parseFloat(emp.employee_pf_pct) || 12;
+  const erp = parseFloat(emp.employer_pf_pct) || 12;
+  const ptAmt = parseFloat(emp.prof_tax_amount) || 200;
 
-  // Full-month components
-  const basic        = Math.round(wage * 0.50 * 100) / 100;
-  const hra          = Math.round(basic * 0.40 * 100) / 100;
-  const stdAllowance = 967.00;
-  const perfBonus    = Math.round(basic * 0.0933 * 100) / 100;
-  const lta          = Math.round(basic * 0.0933 * 100) / 100;
-  const fixedAllow   = Math.round((wage - basic - hra - stdAllowance - perfBonus - lta) * 100) / 100;
+  // Full-month components (using existing formulas)
+  const basic = Math.round(wage * (bp / 100) * 100) / 100;
+  const hra = Math.round(basic * (hp / 100) * 100) / 100;
+  const std = Math.round(basic * (sp / 100) * 100) / 100;
+  const perf = Math.round(basic * (pp / 100) * 100) / 100;
+  const lta = Math.round(basic * (lp / 100) * 100) / 100;
 
-  // Pro-rate all earnings
+  const earningsSumBeforeFixed = basic + hra + std + perf + lta;
+  const fixed = Math.round((wage - earningsSumBeforeFixed) * 100) / 100;
+
+  // Pro-rate all earnings by attendance ratio
   const r = ratio;
-  const pBasic  = Math.round(basic * r * 100) / 100;
-  const pHra    = Math.round(hra * r * 100) / 100;
-  const pStd    = Math.round(stdAllowance * r * 100) / 100;
-  const pPerf   = Math.round(perfBonus * r * 100) / 100;
-  const pLta    = Math.round(lta * r * 100) / 100;
-  const pFixed  = Math.round(fixedAllow * r * 100) / 100;
-  const gross   = Math.round((pBasic + pHra + pStd + pPerf + pLta + pFixed) * 100) / 100;
+  const pBasic = Math.round(basic * r * 100) / 100;
+  const pHra = Math.round(hra * r * 100) / 100;
+  const pStd = Math.round(std * r * 100) / 100;
+  const pPerf = Math.round(perf * r * 100) / 100;
+  const pLta = Math.round(lta * r * 100) / 100;
+  const pFixed = Math.round(fixed * r * 100) / 100;
+
+  const gross = Math.round((pBasic + pHra + pStd + pPerf + pLta + pFixed) * 100) / 100;
 
   // Deductions on prorated basic
-  const pfEmp   = Math.round(pBasic * (pfRate / 100) * 100) / 100;
-  const pfEr    = Math.round(pBasic * (pfRate / 100) * 100) / 100;
-  const pt      = gross >= 15000 ? profTax : 0;
-  const tds     = 0;
+  const pfEmp = Math.round(pBasic * (ep / 100) * 100) / 100;
+  const pfEr = Math.round(pBasic * (erp / 100) * 100) / 100;
+  const pt = gross >= 15000 ? ptAmt : 0;
+  const tds = 0;
   const totalDed = Math.round((pfEmp + pt + tds) * 100) / 100;
-  const netPay  = Math.round((gross - totalDed) * 100) / 100;
+  const netPay = Math.round((gross - totalDed) * 100) / 100;
 
   return {
     basic: pBasic, hra: pHra, standardAllowance: pStd, performanceBonus: pPerf,
@@ -53,10 +63,10 @@ const generate = async (req, res) => {
       if (day !== 0 && day !== 6) workingDays++;
     }
 
-    let empQuery = `SELECT e.* FROM employees e JOIN users u ON e.user_id = u.id WHERE e.status = 'active' AND u.role = 'employee'`;
+    let empQuery = `SELECT * FROM employees WHERE status = 'active'`;
     const params = [];
     if (employee_ids && employee_ids.length > 0) {
-      empQuery += ` AND e.id IN (${employee_ids.map(() => '?').join(',')})`;
+      empQuery += ` AND id IN (${employee_ids.map(() => '?').join(',')})`;
       params.push(...employee_ids);
     }
     const [employees] = await db.execute(empQuery, params);
@@ -95,9 +105,9 @@ const generate = async (req, res) => {
           tds=VALUES(tds), total_deductions=VALUES(total_deductions),
           net_pay=VALUES(net_pay), status='processed', generated_by=VALUES(generated_by)`,
         [emp.id, month, year, workingDays, daysWorked.toFixed(1),
-         c.basic, c.hra, c.standardAllowance, c.performanceBonus, c.lta, c.fixedAllowance,
-         c.grossEarnings, c.pfEmployee, c.pfEmployer, c.professionalTax, c.tds,
-         c.totalDeductions, c.netPay, req.user.id]
+        c.basic, c.hra, c.standardAllowance, c.performanceBonus, c.lta, c.fixedAllowance,
+        c.grossEarnings, c.pfEmployee, c.pfEmployer, c.professionalTax, c.tds,
+        c.totalDeductions, c.netPay, req.user.id]
       );
       results.push({ employee_id: emp.id, employee_code: emp.employee_code, net_pay: c.netPay });
     }
@@ -120,7 +130,7 @@ const getAll = async (req, res) => {
                  JOIN users u ON u.id = e.user_id WHERE u.role = 'employee'`;
     const params = [];
     if (month) { query += ` AND p.pay_period_month=?`; params.push(month); }
-    if (year)  { query += ` AND p.pay_period_year=?`;  params.push(year); }
+    if (year) { query += ` AND p.pay_period_year=?`; params.push(year); }
     if (employee_id) { query += ` AND p.employee_id=?`; params.push(employee_id); }
     // Employees can only see their own
     if (req.user.role === 'employee') {
@@ -222,7 +232,6 @@ const getDashboardStats = async (req, res) => {
   }
 };
 
-// Get salary statement for a year
 const getStatement = async (req, res) => {
   try {
     const { employee_id, year } = req.query;
@@ -260,4 +269,7 @@ const getStatement = async (req, res) => {
   }
 };
 
+
 module.exports = { generate, getAll, getPayslip, update, validatePayrun, getDashboardStats, getStatement };
+
+

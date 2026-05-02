@@ -1,0 +1,2486 @@
+D:\odoo-hack-finals\empay-backend\src\controllers\authController.js
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const db = require('../db/connection');
+
+const login = async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password)
+      return res.status(400).json({ success: false, message: 'Email and password required' });
+
+    const [users] = await db.execute(
+      `SELECT u.*, e.id as employee_id, e.first_name, e.last_name, e.employee_code, e.department, e.designation
+       FROM users u LEFT JOIN employees e ON e.user_id = u.id
+       WHERE u.email = ? AND u.is_active = 1`,
+      [email]
+    );
+
+    if (!users.length)
+      return res.status(401).json({ success: false, message: 'Invalid credentials' });
+
+    const user = users[0];
+    const valid = await bcrypt.compare(password, user.password_hash);
+    if (!valid)
+      return res.status(401).json({ success: false, message: 'Invalid credentials' });
+
+    const payload = {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      employee_id: user.employee_id,
+      name: user.first_name ? `${user.first_name} ${user.last_name}` : user.email,
+      employee_code: user.employee_code,
+      login_id: user.login_id || user.employee_code,
+      department: user.department,
+      designation: user.designation,
+    };
+
+    const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN });
+
+    res.json({ success: true, token, user: payload });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+const getMe = async (req, res) => {
+  try {
+    const [rows] = await db.execute(
+      `SELECT u.id, u.email, u.role, u.login_id, e.id as employee_id, e.first_name, e.last_name,
+              e.employee_code, e.department, e.designation, e.phone, e.address, e.wage,
+              e.pan_number, e.uan_number, e.bank_account, e.basic_salary, e.date_of_joining, e.status,
+              e.profile_image
+       FROM users u LEFT JOIN employees e ON e.user_id = u.id
+       WHERE u.id = ?`,
+      [req.user.id]
+    );
+    if (!rows.length) return res.status(404).json({ success: false, message: 'User not found' });
+    res.json({ success: true, data: rows[0] });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+const changePassword = async (req, res) => {
+  try {
+    const { current_password, new_password } = req.body;
+    const [users] = await db.execute(`SELECT password_hash FROM users WHERE id = ?`, [req.user.id]);
+    if (!users.length) return res.status(404).json({ success: false, message: 'User not found' });
+
+    const valid = await bcrypt.compare(current_password, users[0].password_hash);
+    if (!valid) return res.status(400).json({ success: false, message: 'Current password is incorrect' });
+
+    const newHash = await bcrypt.hash(new_password, 10);
+    await db.execute(`UPDATE users SET password_hash = ? WHERE id = ?`, [newHash, req.user.id]);
+    res.json({ success: true, message: 'Password changed successfully' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+module.exports = { login, getMe, changePassword };
+
+
+
+
+
+
+empay-backend\src\controllers\employeesController.js
+
+const db = require('../db/connection');
+const bcrypt = require('bcryptjs');
+const { sendCredentialsEmail } = require('../utils/emailService');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
+
+// Configure multer for profile images
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    try {
+      const dir = path.join(__dirname, '..', '..', 'uploads', 'profiles');
+      console.log('Multer destination:', dir);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+        console.log('Created directory:', dir);
+      }
+      cb(null, dir);
+    } catch (e) {
+      console.error('Multer destination error:', e);
+      cb(e);
+    }
+  },
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname);
+    const id = req.params.id || 'unknown';
+    cb(null, `profile-${id}-${Date.now()}${ext}`);
+  }
+});
+const upload = multer({ storage }).single('image');
+
+const LEAVE_TYPES = [['sick', 12], ['casual', 10], ['earned', 15]];
+
+const COMPANY_PREFIX = 'EP'; // EmPay
+
+// Generate EMP001-style sequential code (for employee_code field)
+async function nextEmpCode(conn) {
+  const [rows] = await conn.query(`SELECT MAX(CAST(SUBSTRING(employee_code, 4) AS UNSIGNED)) AS mx FROM employees`);
+  const next = (rows[0].mx || 0) + 1;
+  return `EMP${String(next).padStart(3, '0')}`;
+}
+
+/**
+ * Generate Login ID: [EP][XX][XX][YYYY][NNNN]
+ * EP   = Company prefix
+ * XX   = First 2 letters of first name (uppercase)
+ * XX   = First 2 letters of last name  (uppercase)
+ * YYYY = Year of joining
+ * NNNN = Serial number of joining in that year (per-year counter)
+ * Example: John Doe joining 2023 → EPJODO20230001
+ */
+async function generateLoginId(conn, firstName, lastName, dateOfJoining) {
+  const year = dateOfJoining
+    ? new Date(dateOfJoining).getFullYear()
+    : new Date().getFullYear();
+  const fn = (firstName || 'XX').substring(0, 2).toUpperCase();
+  const ln = (lastName  || 'XX').substring(0, 2).toUpperCase();
+
+  // Count how many employees already have a login_id for this year → gives serial position
+  const [rows] = await conn.query(
+    `SELECT COUNT(*) AS cnt FROM users WHERE login_id LIKE ?`,
+    [`${COMPANY_PREFIX}____${year}%`]
+  );
+  const serial = String((rows[0].cnt || 0) + 1).padStart(4, '0');
+  return `${COMPANY_PREFIX}${fn}${ln}${year}${serial}`;
+}
+
+// Compute salary components from total monthly wage
+// basic_pct  : % of wage that becomes Basic
+// hra_pct    : % of Basic that becomes HRA
+// std_pct    : % of Basic that becomes Standard Allowance
+// bonus_pct  : % of Basic that becomes Performance Bonus
+// lta_pct    : % of Basic that becomes LTA
+// epf_pct    : % of Basic for Employee PF
+// erpf_pct   : % of Basic for Employer PF
+// pt_amount  : Professional Tax (fixed amount)
+function computeSalaryComponents(wage, basic_pct=50, hra_pct=50, std_pct=0, bonus_pct=8.33, lta_pct=8.33, epf_pct=12, erpf_pct=12, pt_amount=200) {
+  const w    = Math.max(0, parseFloat(wage)       || 0);
+  const bp   = Math.max(0, parseFloat(basic_pct)  || 0);
+  const hp   = Math.max(0, parseFloat(hra_pct)    || 0);
+  const sp   = Math.max(0, parseFloat(std_pct)    || 0);
+  const pp   = Math.max(0, parseFloat(bonus_pct)  || 0);
+  const lp   = Math.max(0, parseFloat(lta_pct)    || 0);
+  const ep   = Math.max(0, parseFloat(epf_pct)    || 0);
+  const erp  = Math.max(0, parseFloat(erpf_pct)   || 0);
+  const pt   = Math.max(0, parseFloat(pt_amount)  || 0);
+
+  const annualSalary    = Math.round(w * 12 * 100) / 100;
+  const basicSalary     = Math.round(w * (bp / 100) * 100) / 100;
+  const hraAmount       = Math.round(basicSalary * (hp / 100) * 100) / 100;
+  const standardAllow   = Math.round(basicSalary * (sp / 100) * 100) / 100;
+  const performanceBonus = Math.round(basicSalary * (pp / 100) * 100) / 100;
+  const ltaAmount       = Math.round(basicSalary * (lp / 100) * 100) / 100;
+  const employeePf      = Math.round(basicSalary * (ep / 100) * 100) / 100;
+  const employerPf      = Math.round(basicSalary * (erp / 100) * 100) / 100;
+
+  // Following Gross Salary must equal Monthly Salary rule:
+  // Gross = Basic + HRA + Standard + Perf + LTA + Fixed = Wage
+  // So Fixed = Wage - (Basic + HRA + Standard + Perf + LTA)
+  const earningsSumBeforeFixed = basicSalary + hraAmount + standardAllow + performanceBonus + ltaAmount;
+  const fixedAllowance = Math.round((w - earningsSumBeforeFixed) * 100) / 100;
+
+  const grossSalary     = Math.round((earningsSumBeforeFixed + fixedAllowance) * 100) / 100; // should be w
+  const totalDeductions = Math.round((employeePf + pt) * 100) / 100;
+  const netSalary       = Math.round((grossSalary - totalDeductions) * 100) / 100;
+
+  return {
+    annualSalary, basicSalary, hraAmount, standardAllow, performanceBonus, ltaAmount,
+    employeePf, employerPf, fixedAllowance, grossSalary, totalDeductions, netSalary
+  };
+}
+
+// GET all employees (with today status)
+const getAll = async (req, res) => {
+  try {
+    // Employees only see themselves; admins/HR see all non-admin employees
+    let query = `SELECT e.id, e.employee_code, e.first_name, e.last_name, e.department, e.designation, e.phone, e.location,
+                        e.profile_image, e.status,
+                        u.email, u.role, u.is_active, u.login_id,
+        (SELECT status FROM attendance WHERE employee_id = e.id AND date = CURDATE() LIMIT 1) AS today_attendance,
+        (SELECT 1 FROM time_off_requests WHERE employee_id = e.id AND status='approved' AND CURDATE() BETWEEN start_date AND end_date LIMIT 1) AS on_leave_today
+       FROM employees e JOIN users u ON u.id = e.user_id
+       WHERE u.role != 'admin'`;
+    const params = [];
+
+    if (req.user.role === 'employee') {
+      // Employees can see all other employees' basic details
+      // but not their own in this list (to avoid duplication on profile page)
+      // query += ` AND e.user_id != ?`;
+      // params.push(req.user.id);
+    }
+    query += ` ORDER BY e.employee_code`;
+
+    const [rows] = await db.execute(query, params);
+    res.json({ success: true, data: rows });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+// GET single employee
+const getOne = async (req, res) => {
+  try {
+    const isOwnProfile = req.user.role === 'employee' && (await db.execute(`SELECT user_id FROM employees WHERE id = ?`, [req.params.id]))[0][0]?.user_id === req.user.id;
+
+    let query;
+    const canSeeFull = req.user.role === 'admin' || req.user.role === 'hr_officer' ||
+                       req.user.role === 'payroll_officer' || isOwnProfile;
+
+    if (canSeeFull) {
+      // Full access for admin, HR, payroll_officer, or when viewing own profile
+      query = `SELECT e.*, u.email, u.role, u.is_active, u.login_id,
+                      m.first_name AS manager_first_name, m.last_name AS manager_last_name
+               FROM employees e
+               JOIN users u ON u.id = e.user_id
+               LEFT JOIN employees m ON m.id = e.manager_id
+               WHERE e.id = ?`;
+    } else {
+      // Limited access for employees viewing other profiles
+      query = `SELECT e.id, e.employee_code, e.first_name, e.last_name, e.department, e.designation, e.phone, e.location,
+                      u.email, u.role, u.is_active
+               FROM employees e
+               JOIN users u ON u.id = e.user_id
+               WHERE e.id = ? AND u.role != 'admin'`;
+    }
+
+    const [rows] = await db.execute(query, [req.params.id]);
+    if (!rows.length) return res.status(404).json({ success: false, message: 'Not found' });
+    res.json(rows[0]);
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+// GET own profile
+const getMyProfile = async (req, res) => {
+  try {
+    const [rows] = await db.execute(
+      `SELECT e.*, u.email, u.role, u.login_id FROM employees e JOIN users u ON u.id = e.user_id WHERE e.user_id = ?`,
+      [req.user.id]
+    );
+    if (!rows.length) return res.status(404).json({ success: false, message: 'Profile not found' });
+    res.json(rows[0]);
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+// POST create employee
+const create = async (req, res) => {
+  const conn = await db.getConnection();
+  try {
+    await conn.beginTransaction();
+    const {
+      email, role = 'employee', first_name, last_name, department, designation,
+      date_of_joining, phone, address, pan_number, uan_number, bank_account, bank_name,
+      ifsc_code, uam_id, wage = 0, location, manager_id,
+    } = req.body;
+
+    // Generate temp password
+    const tempPassword = `Emp@${Math.random().toString(36).slice(-6).toUpperCase()}`;
+    const hash = await bcrypt.hash(tempPassword, 10);
+
+    // Generate employee code (EMP001) and login ID (EPJODO20230001) separately
+    const empCode = await nextEmpCode(conn);
+    const loginId = await generateLoginId(conn, first_name, last_name, date_of_joining);
+
+    const [userRes] = await conn.execute(
+      `INSERT INTO users (email, password_hash, role, login_id) VALUES (?, ?, ?, ?)`,
+      [email, hash, role, loginId]
+    );
+    const userId = userRes.insertId;
+
+    // Auto-calculate salary components from wage
+    const c = computeSalaryComponents(wage);
+
+    const [empRes] = await conn.execute(
+      `INSERT INTO employees (user_id, employee_code, first_name, last_name, department, designation,
+        date_of_joining, phone, address, pan_number, uan_number, bank_account, bank_name, ifsc_code, uam_id,
+        wage, basic_salary, hra, standard_allowance, performance_bonus, lta, fixed_allowance,
+        annual_salary, employee_pf, employer_pf, gross_salary, total_deductions, net_salary,
+        location, manager_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [userId, empCode, first_name, last_name, department, designation,
+       date_of_joining, phone, address, pan_number, uan_number, bank_account, bank_name, ifsc_code, uam_id,
+       wage, c.basicSalary, c.hraAmount, c.standardAllow, c.performanceBonus, c.ltaAmount, c.fixedAllowance,
+       c.annualSalary, c.employeePf, c.employerPf, c.grossSalary, c.totalDeductions, c.netSalary,
+       location, manager_id || null]
+    );
+
+    const year = new Date().getFullYear();
+    for (const [lt, alloc] of LEAVE_TYPES) {
+      await conn.execute(
+        `INSERT IGNORE INTO leave_balances (employee_id, leave_type, total_allocated, used, year) VALUES (?, ?, ?, 0, ?)`,
+        [empRes.insertId, lt, alloc, year]
+      );
+    }
+
+    await conn.commit();
+
+    // Send credentials email
+    await sendCredentialsEmail({
+      toName: `${first_name} ${last_name}`,
+      toEmail: email,
+      loginId: loginId,
+      password: tempPassword
+    });
+
+    res.status(201).json({
+      success: true,
+      message: 'Employee created successfully',
+      data: { employee_id: empRes.insertId, employee_code: empCode, login_id: loginId, email },
+    });
+  } catch (err) {
+    await conn.rollback();
+    console.error(err);
+    if (err.code === 'ER_DUP_ENTRY')
+      return res.status(409).json({ success: false, message: 'Email already exists' });
+    res.status(500).json({ success: false, message: 'Server error' });
+  } finally {
+    conn.release();
+  }
+};
+
+// PUT update employee (general + private info + salary info)
+const update = async (req, res) => {
+  try {
+    if (req.user.role === 'employee') {
+      const [check] = await db.execute(`SELECT user_id FROM employees WHERE id = ?`, [req.params.id]);
+      if (!check.length || check[0].user_id !== req.user.id)
+        return res.status(403).json({ success: false, message: 'Cannot edit others' });
+    }
+
+    const b = req.body;
+    let wage = b.wage;    // Determine which percentages to use (keep existing if not provided)
+    const [existing] = await db.execute(`SELECT * FROM employees WHERE id=?`, [req.params.id]);
+    const ex = existing[0] || {};
+
+    const bPct = b.basic_pct !== undefined ? b.basic_pct : (ex.basic_pct || 50);
+    const hPct = b.hra_pct   !== undefined ? b.hra_pct   : (ex.hra_pct   || 50);
+    const sPct = b.standard_allowance_pct !== undefined ? b.standard_allowance_pct : (ex.standard_allowance_pct || 0);
+    const pPct = b.perf_pct  !== undefined ? b.perf_pct  : (ex.perf_pct  || 8.33);
+    const lPct = b.lta_pct   !== undefined ? b.lta_pct   : (ex.lta_pct   || 8.33);
+    const epPct = b.employee_pf_pct !== undefined ? b.employee_pf_pct : (ex.employee_pf_pct || 12);
+    const erPct = b.employer_pf_pct !== undefined ? b.employer_pf_pct : (ex.employer_pf_pct || 12);
+    const ptAmt = b.prof_tax_amount !== undefined ? b.prof_tax_amount : (ex.prof_tax_amount || 200);
+
+    // If wage or any percentage changed, recompute components
+    let c = {
+      basicSalary: ex.basic_salary, hraAmount: ex.hra, standardAllow: ex.standard_allowance,
+      performanceBonus: ex.performance_bonus, ltaAmount: ex.lta, fixedAllowance: ex.fixed_allowance,
+      annualSalary: ex.annual_salary, employeePf: ex.employee_pf, employerPf: ex.employer_pf,
+      grossSalary: ex.gross_salary, totalDeductions: ex.total_deductions, netSalary: ex.net_salary
+    };
+
+    if (wage !== undefined || b.basic_pct !== undefined || b.hra_pct !== undefined ||
+        b.standard_allowance_pct !== undefined || b.perf_pct !== undefined ||
+        b.lta_pct !== undefined || b.employee_pf_pct !== undefined ||
+        b.employer_pf_pct !== undefined || b.prof_tax_amount !== undefined) {
+      c = computeSalaryComponents(wage !== undefined ? wage : ex.wage, bPct, hPct, sPct, pPct, lPct, epPct, erPct, ptAmt);
+    }
+
+    await db.execute(
+      `UPDATE employees SET
+        first_name=COALESCE(?,first_name), last_name=COALESCE(?,last_name),
+        department=COALESCE(?,department), designation=COALESCE(?,designation),
+        date_of_joining=COALESCE(?,date_of_joining), phone=COALESCE(?,phone),
+        address=COALESCE(?,address), pan_number=COALESCE(?,pan_number),
+        uan_number=COALESCE(?,uan_number), bank_account=COALESCE(?,bank_account),
+        bank_name=COALESCE(?,bank_name), ifsc_code=COALESCE(?,ifsc_code),
+        uam_id=COALESCE(?,uam_id), location=COALESCE(?,location),
+        manager_id=COALESCE(?,manager_id), status=COALESCE(?,status),
+        wage=COALESCE(?,wage), basic_salary=COALESCE(?,basic_salary),
+        hra=COALESCE(?,hra), standard_allowance=COALESCE(?,standard_allowance),
+        performance_bonus=COALESCE(?,performance_bonus), lta=COALESCE(?,lta),
+        fixed_allowance=COALESCE(?,fixed_allowance),
+        annual_salary=COALESCE(?,annual_salary), employee_pf=COALESCE(?,employee_pf),
+        employer_pf=COALESCE(?,employer_pf), gross_salary=COALESCE(?,gross_salary),
+        total_deductions=COALESCE(?,total_deductions), net_salary=COALESCE(?,net_salary),
+        basic_pct=COALESCE(?,basic_pct), hra_pct=COALESCE(?,hra_pct),
+        standard_allowance_pct=COALESCE(?,standard_allowance_pct), perf_pct=COALESCE(?,perf_pct),
+        lta_pct=COALESCE(?,lta_pct), employee_pf_pct=COALESCE(?,employee_pf_pct),
+        employer_pf_pct=COALESCE(?,employer_pf_pct), prof_tax_amount=COALESCE(?,prof_tax_amount),
+        birth_date=COALESCE(?,birth_date), gender=COALESCE(?,gender),
+        marital_status=COALESCE(?,marital_status), nationality=COALESCE(?,nationality),
+        personal_email=COALESCE(?,personal_email), permanent_address=COALESCE(?,permanent_address),
+        about=COALESCE(?,about), skills=COALESCE(?,skills), certifications=COALESCE(?,certifications),
+        work_passion=COALESCE(?,work_passion), hobbies=COALESCE(?,hobbies),
+        pf_rate=COALESCE(?,pf_rate),
+        working_days_per_week=COALESCE(?,working_days_per_week), break_time_hrs=COALESCE(?,break_time_hrs)
+       WHERE id=?`,
+      [b.first_name, b.last_name, b.department, b.designation, b.date_of_joining, b.phone,
+       b.address, b.pan_number, b.uan_number, b.bank_account, b.bank_name, b.ifsc_code,
+       b.uam_id, b.location, b.manager_id || null, b.status,
+       wage, c.basicSalary, c.hraAmount, c.standardAllow, c.performanceBonus, c.ltaAmount, c.fixedAllowance,
+       c.annualSalary, c.employeePf, c.employerPf, c.grossSalary, c.totalDeductions, c.netSalary,
+       b.basic_pct, b.hra_pct, b.standard_allowance_pct, b.perf_pct, b.lta_pct,
+       b.employee_pf_pct, b.employer_pf_pct, b.prof_tax_amount,
+       b.birth_date, b.gender, b.marital_status, b.nationality, b.personal_email, b.permanent_address,
+       b.about, b.skills, b.certifications,
+       b.work_passion, b.hobbies,
+       b.pf_rate, b.working_days_per_week, b.break_time_hrs,
+       req.params.id]
+    );
+    res.json({ success: true, message: 'Employee updated' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+// DELETE
+const remove = async (req, res) => {
+  try {
+    await db.execute(`DELETE FROM employees WHERE id = ?`, [req.params.id]);
+    res.json({ success: true, message: 'Deleted' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+const uploadImage = (req, res) => {
+  console.log('--- Upload Image Request ---');
+  console.log('User from token:', req.user);
+  console.log('Params ID:', req.params.id);
+
+  if (!req.user) {
+    return res.status(401).json({ success: false, message: 'Unauthorized' });
+  }
+
+  // Run multer first, then do the permission check
+  upload(req, res, async (err) => {
+    if (err) {
+      console.error('Multer processing error:', err);
+      return res.status(500).json({ success: false, message: 'Upload error: ' + err.message });
+    }
+
+    if (!req.file) {
+      console.error('Upload failed: No file found in request');
+      return res.status(400).json({ success: false, message: 'No file uploaded' });
+    }
+
+    try {
+      // Look up the employee's owner from DB (more reliable than stale JWT)
+      const [empRows] = await db.execute(`SELECT user_id FROM employees WHERE id = ?`, [req.params.id]);
+      if (!empRows.length) {
+        fs.unlinkSync(req.file.path); // clean up uploaded file
+        return res.status(404).json({ success: false, message: 'Employee not found' });
+      }
+
+      const isAdmin = ['admin', 'hr_officer'].includes(req.user.role);
+      const isOwner = empRows[0].user_id === req.user.id;
+
+      if (!isAdmin && !isOwner) {
+        fs.unlinkSync(req.file.path); // clean up uploaded file
+        console.error(`Upload denied: User ${req.user.id} tried to upload for employee ${req.params.id}`);
+        return res.status(403).json({ success: false, message: 'Access denied: You can only update your own profile picture' });
+      }
+
+      const imagePath = `/uploads/profiles/${req.file.filename}`;
+      console.log('File saved to:', req.file.path);
+      console.log('Updating DB with path:', imagePath);
+
+      const [result] = await db.execute(`UPDATE employees SET profile_image = ? WHERE id = ?`, [imagePath, req.params.id]);
+      console.log('DB Update result:', result);
+
+      res.json({ success: true, message: 'Profile image updated', imageUrl: imagePath });
+    } catch (dbErr) {
+      console.error('Database error in uploadImage:', dbErr);
+      // Try to clean up the file on error
+      try { if (req.file) fs.unlinkSync(req.file.path); } catch(_) {}
+      res.status(500).json({ success: false, message: 'Database error: ' + dbErr.message });
+    }
+  });
+};
+
+// PUT /employees/:id/salary  — ADMIN & PAYROLL OFFICER ONLY
+// Accepts: wage, working_days_per_week, basic_pct, hra_pct, standard_allowance_fixed
+// Recomputes ALL salary components and persists to DB.
+const updateSalary = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const safeNum = (v, fallback) => { const n = parseFloat(v); return isNaN(n) ? fallback : n; };
+
+    const wage                   = req.body.wage;
+    const working_days_per_week  = req.body.working_days_per_week;
+    const basic_pct              = req.body.basic_pct;
+    const hra_pct                = req.body.hra_pct;
+    const standard_allowance_pct = req.body.standard_allowance_pct;
+    const perf_pct               = req.body.perf_pct;
+    const lta_pct                = req.body.lta_pct;
+    const employee_pf_pct        = req.body.employee_pf_pct;
+    const employer_pf_pct        = req.body.employer_pf_pct;
+    const prof_tax_amount        = req.body.prof_tax_amount;
+
+    if (wage === undefined || wage === null)
+      return res.status(400).json({ success: false, message: 'wage is required' });
+
+    const pWage  = safeNum(wage, 0);
+    const pBasic = safeNum(basic_pct, 50);
+    const pHra   = safeNum(hra_pct, 50);
+    const pStd   = safeNum(standard_allowance_pct, 0);
+    const pPerf  = safeNum(perf_pct, 8.33);
+    const pLta   = safeNum(lta_pct, 8.33);
+    const pEpf   = safeNum(employee_pf_pct, 12);
+    const pErpf  = safeNum(employer_pf_pct, 12);
+    const pPt    = safeNum(prof_tax_amount, 200);
+    const pWpw   = safeNum(working_days_per_week, null);
+
+    const c = computeSalaryComponents(pWage, pBasic, pHra, pStd, pPerf, pLta, pEpf, pErpf, pPt);
+
+    await db.execute(
+      `UPDATE employees SET
+         wage=?, basic_salary=?, hra=?,
+         standard_allowance=?, performance_bonus=?, lta=?, fixed_allowance=?,
+         basic_pct=?, hra_pct=?, standard_allowance_pct=?, perf_pct=?, lta_pct=?,
+         employee_pf_pct=?, employer_pf_pct=?, prof_tax_amount=?,
+         annual_salary=?, employee_pf=?, employer_pf=?, gross_salary=?, total_deductions=?, net_salary=?,
+         working_days_per_week=COALESCE(?,working_days_per_week)
+       WHERE id=?`,
+      [
+        pWage, c.basicSalary, c.hraAmount,
+        c.standardAllow, c.performanceBonus, c.ltaAmount, c.fixedAllowance,
+        pBasic, pHra, pStd, pPerf, pLta,
+        pEpf, pErpf, pPt,
+        c.annualSalary, c.employeePf, c.employerPf, c.grossSalary, c.totalDeductions, c.netSalary,
+        pWpw,
+        id,
+      ]
+    );
+
+    res.json({
+      success: true,
+      message: 'Salary configuration updated',
+      data: {
+        ...c,
+        basic_pct: pBasic, hra_pct: pHra, standard_allowance_pct: pStd,
+        perf_pct: pPerf, lta_pct: pLta, employee_pf_pct: pEpf, employer_pf_pct: pErpf,
+        prof_tax_amount: pPt, working_days_per_week: pWpw
+      },
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+module.exports = {
+  getAll,
+  getOne,
+  getMyProfile,
+  create,
+  update,
+  remove,
+  updateSalary,
+  uploadImage,
+  computeSalaryComponents
+};
+
+
+
+empay-backend\src\controllers\payrollController.js
+
+const db = require('../db/connection');
+
+// Proper salary formula from employee stored parameters
+function calcComponents(emp, ratio) {
+  const wage = parseFloat(emp.wage) || 0;
+  const bp   = parseFloat(emp.basic_pct) || 50;
+  const hp   = parseFloat(emp.hra_pct) || 50;
+  const sp   = parseFloat(emp.standard_allowance_pct) || 0;
+  const pp   = parseFloat(emp.perf_pct) || 8.33;
+  const lp   = parseFloat(emp.lta_pct) || 8.33;
+  const ep   = parseFloat(emp.employee_pf_pct) || 12;
+  const erp  = parseFloat(emp.employer_pf_pct) || 12;
+  const ptAmt = parseFloat(emp.prof_tax_amount) || 200;
+
+  // Full-month components (using existing formulas)
+  const basic = Math.round(wage * (bp / 100) * 100) / 100;
+  const hra   = Math.round(basic * (hp / 100) * 100) / 100;
+  const std   = Math.round(basic * (sp / 100) * 100) / 100;
+  const perf  = Math.round(basic * (pp / 100) * 100) / 100;
+  const lta   = Math.round(basic * (lp / 100) * 100) / 100;
+  
+  const earningsSumBeforeFixed = basic + hra + std + perf + lta;
+  const fixed = Math.round((wage - earningsSumBeforeFixed) * 100) / 100;
+
+  // Pro-rate all earnings by attendance ratio
+  const r = ratio;
+  const pBasic = Math.round(basic * r * 100) / 100;
+  const pHra   = Math.round(hra * r * 100) / 100;
+  const pStd   = Math.round(std * r * 100) / 100;
+  const pPerf  = Math.round(perf * r * 100) / 100;
+  const pLta   = Math.round(lta * r * 100) / 100;
+  const pFixed = Math.round(fixed * r * 100) / 100;
+  
+  const gross = Math.round((pBasic + pHra + pStd + pPerf + pLta + pFixed) * 100) / 100;
+
+  // Deductions on prorated basic
+  const pfEmp   = Math.round(pBasic * (ep / 100) * 100) / 100;
+  const pfEr    = Math.round(pBasic * (erp / 100) * 100) / 100;
+  const pt      = gross >= 15000 ? ptAmt : 0;
+  const tds     = 0;
+  const totalDed = Math.round((pfEmp + pt + tds) * 100) / 100;
+  const netPay  = Math.round((gross - totalDed) * 100) / 100;
+
+  return {
+    basic: pBasic, hra: pHra, standardAllowance: pStd, performanceBonus: pPerf,
+    lta: pLta, fixedAllowance: pFixed, grossEarnings: gross,
+    pfEmployee: pfEmp, pfEmployer: pfEr, professionalTax: pt, tds, totalDeductions: totalDed, netPay,
+  };
+}
+
+// Generate payroll
+const generate = async (req, res) => {
+  try {
+    const { month, year, employee_ids } = req.body;
+    if (!month || !year) return res.status(400).json({ success: false, message: 'Month and year required' });
+
+    // Working days = weekdays in month
+    const daysInMonth = new Date(year, month, 0).getDate();
+    let workingDays = 0;
+    for (let d = 1; d <= daysInMonth; d++) {
+      const day = new Date(year, month - 1, d).getDay();
+      if (day !== 0 && day !== 6) workingDays++;
+    }
+
+    let empQuery = `SELECT * FROM employees WHERE status = 'active'`;
+    const params = [];
+    if (employee_ids && employee_ids.length > 0) {
+      empQuery += ` AND id IN (${employee_ids.map(() => '?').join(',')})`;
+      params.push(...employee_ids);
+    }
+    const [employees] = await db.execute(empQuery, params);
+    const results = [];
+
+    for (const emp of employees) {
+      const [attRows] = await db.execute(
+        `SELECT status, COUNT(*) as cnt FROM attendance WHERE employee_id=? AND MONTH(date)=? AND YEAR(date)=? GROUP BY status`,
+        [emp.id, month, year]
+      );
+      let daysWorked = 0;
+      for (const row of attRows) {
+        if (row.status === 'present') daysWorked += row.cnt * 1.0;
+        else if (row.status === 'half_day') daysWorked += row.cnt * 0.5;
+        else if (row.status === 'on_leave') daysWorked += row.cnt * 1.0;
+      }
+      // Default to full month if no attendance recorded yet
+      if (daysWorked === 0 && attRows.length === 0) daysWorked = workingDays;
+
+      const ratio = workingDays > 0 ? daysWorked / workingDays : 1;
+      const c = calcComponents(emp, ratio);
+
+      await db.execute(
+        `INSERT INTO payroll (employee_id, pay_period_month, pay_period_year, working_days, days_worked,
+          basic_salary, hra, standard_allowance, performance_bonus, lta, fixed_allowance,
+          gross_earnings, pf_employee, pf_employer, professional_tax, tds, total_deductions, net_pay,
+          status, generated_by)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'processed',?)
+         ON DUPLICATE KEY UPDATE
+          working_days=VALUES(working_days), days_worked=VALUES(days_worked),
+          basic_salary=VALUES(basic_salary), hra=VALUES(hra),
+          standard_allowance=VALUES(standard_allowance), performance_bonus=VALUES(performance_bonus),
+          lta=VALUES(lta), fixed_allowance=VALUES(fixed_allowance),
+          gross_earnings=VALUES(gross_earnings), pf_employee=VALUES(pf_employee),
+          pf_employer=VALUES(pf_employer), professional_tax=VALUES(professional_tax),
+          tds=VALUES(tds), total_deductions=VALUES(total_deductions),
+          net_pay=VALUES(net_pay), status='processed', generated_by=VALUES(generated_by)`,
+        [emp.id, month, year, workingDays, daysWorked.toFixed(1),
+         c.basic, c.hra, c.standardAllowance, c.performanceBonus, c.lta, c.fixedAllowance,
+         c.grossEarnings, c.pfEmployee, c.pfEmployer, c.professionalTax, c.tds,
+         c.totalDeductions, c.netPay, req.user.id]
+      );
+      results.push({ employee_id: emp.id, employee_code: emp.employee_code, net_pay: c.netPay });
+    }
+
+    res.json({ success: true, message: `Payroll generated for ${results.length} employees`, data: results });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+// Get all payroll records
+const getAll = async (req, res) => {
+  try {
+    const { month, year, employee_id } = req.query;
+    let query = `SELECT p.*, e.first_name, e.last_name, e.employee_code, e.department, e.designation,
+                        e.pan_number, e.uan_number, e.bank_account, e.bank_name, e.wage, u.email
+                 FROM payroll p
+                 JOIN employees e ON e.id = p.employee_id
+                 JOIN users u ON u.id = e.user_id WHERE 1=1`;
+    const params = [];
+    if (month) { query += ` AND p.pay_period_month=?`; params.push(month); }
+    if (year)  { query += ` AND p.pay_period_year=?`;  params.push(year); }
+    if (employee_id) { query += ` AND p.employee_id=?`; params.push(employee_id); }
+    // Employees can only see their own
+    if (req.user.role === 'employee') {
+      query += ` AND e.user_id=?`; params.push(req.user.id);
+    }
+    query += ` ORDER BY p.pay_period_year DESC, p.pay_period_month DESC, e.employee_code`;
+    const [rows] = await db.execute(query, params);
+    res.json({ success: true, data: rows });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+// Get payslip
+const getPayslip = async (req, res) => {
+  try {
+    const [rows] = await db.execute(
+      `SELECT p.*, e.first_name, e.last_name, e.employee_code, e.department, e.designation,
+              e.pan_number, e.uan_number, e.bank_account, e.bank_name, e.date_of_joining, u.email
+       FROM payroll p
+       JOIN employees e ON e.id = p.employee_id
+       JOIN users u ON u.id = e.user_id WHERE p.id=?`,
+      [req.params.id]
+    );
+    if (!rows.length) return res.status(404).json({ success: false, message: 'Not found' });
+    res.json(rows[0]);
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+// Update payroll status/bonus
+const update = async (req, res) => {
+  try {
+    const { status } = req.body;
+    if (status) {
+      await db.execute(`UPDATE payroll SET status=? WHERE id=?`, [status, req.params.id]);
+    }
+    res.json({ success: true, message: 'Payroll updated' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+// Validate entire payrun (month+year) → mark all as 'paid'
+const validatePayrun = async (req, res) => {
+  try {
+    const { month, year } = req.body;
+    if (!month || !year) return res.status(400).json({ success: false, message: 'Month and year required' });
+    await db.execute(
+      `UPDATE payroll SET status='paid' WHERE pay_period_month=? AND pay_period_year=? AND status != 'paid'`,
+      [month, year]
+    );
+    res.json({ success: true, message: `Payrun for ${month}/${year} validated and marked as paid` });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+// Payroll dashboard stats: warnings + monthly employer cost + employee count
+const getDashboardStats = async (req, res) => {
+  try {
+    // Warnings
+    const [[{ no_bank }]] = await db.execute(
+      `SELECT COUNT(*) as no_bank FROM employees WHERE status='active' AND (bank_account IS NULL OR bank_account='')`
+    );
+    const [[{ no_manager }]] = await db.execute(
+      `SELECT COUNT(*) as no_manager FROM employees WHERE status='active' AND (manager_id IS NULL)`
+    );
+
+    // Last 6 months employer cost (gross_earnings = employer cost proxy)
+    const [monthlyCost] = await db.execute(
+      `SELECT pay_period_month as month, pay_period_year as year,
+              SUM(gross_earnings) as employer_cost, COUNT(DISTINCT employee_id) as emp_count
+       FROM payroll
+       WHERE STR_TO_DATE(CONCAT(pay_period_year,'-',pay_period_month,'-01'),'%Y-%m-%d') >= DATE_SUB(CURDATE(), INTERVAL 6 MONTH)
+       GROUP BY pay_period_year, pay_period_month
+       ORDER BY pay_period_year, pay_period_month`
+    );
+
+    // Pay runs summary
+    const [payrunSummary] = await db.execute(
+      `SELECT pay_period_month as month, pay_period_year as year,
+              COUNT(*) as total, SUM(gross_earnings) as gross, SUM(net_pay) as net,
+              SUM(pf_employer) as employer_cost,
+              SUM(CASE WHEN status='paid' THEN 1 ELSE 0 END) as paid_count
+       FROM payroll
+       GROUP BY pay_period_year, pay_period_month
+       ORDER BY pay_period_year DESC, pay_period_month DESC`
+    );
+
+    res.json({
+      success: true,
+      data: { warnings: { no_bank, no_manager }, monthly_cost: monthlyCost, payrun_summary: payrunSummary }
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+module.exports = { generate, getAll, getPayslip, update, validatePayrun, getDashboardStats };
+
+
+
+empay-backend\src\db\migrate.js
+const mysql = require('mysql2/promise');
+require('dotenv').config();
+
+async function addColumnIfMissing(conn, table, column, definition) {
+  const [rows] = await conn.query(
+    `SELECT COUNT(*) as cnt FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=? AND TABLE_NAME=? AND COLUMN_NAME=?`,
+    [process.env.DB_NAME || 'empay_db', table, column]
+  );
+  if (rows[0].cnt === 0) {
+    await conn.query(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+    console.log(`  + ${table}.${column}`);
+  }
+}
+
+async function migrate() {
+  const conn = await mysql.createConnection({
+    host: process.env.DB_HOST || 'localhost',
+    port: process.env.DB_PORT || 3306,
+    user: process.env.DB_USER || 'root',
+    password: process.env.DB_PASSWORD || '',
+    database: process.env.DB_NAME || 'empay_db',
+  });
+  console.log('🔄 Running migrations...');
+
+  // employees new columns
+  const empCols = [
+    ['wage',                  'DECIMAL(12,2) DEFAULT 0'],
+    ['working_days_per_week', 'INT DEFAULT 5'],
+    ['break_time_hrs',        'DECIMAL(4,2) DEFAULT 1.0'],
+    ['pf_rate',               'DECIMAL(5,2) DEFAULT 12.00'],
+    ['prof_tax_amount',       'DECIMAL(10,2) DEFAULT 200.00'],
+    ['basic_pct',             'DECIMAL(5,2) DEFAULT 50.00'],
+    ['hra_pct',               'DECIMAL(5,2) DEFAULT 50.00'],
+    ['standard_allowance_fixed', 'DECIMAL(10,2) DEFAULT 967.00'],
+    ['perf_pct',              'DECIMAL(5,2) DEFAULT 8.33'],
+    ['lta_pct',               'DECIMAL(5,2) DEFAULT 8.33'],
+    ['standard_allowance_pct', 'DECIMAL(5,2) DEFAULT 0.00'],
+    ['employee_pf_pct',       'DECIMAL(5,2) DEFAULT 12.00'],
+    ['employer_pf_pct',       'DECIMAL(5,2) DEFAULT 12.00'],
+    ['annual_salary',         'DECIMAL(15,2) DEFAULT 0.00'],
+    ['employee_pf',           'DECIMAL(12,2) DEFAULT 0.00'],
+    ['employer_pf',           'DECIMAL(12,2) DEFAULT 0.00'],
+    ['gross_salary',          'DECIMAL(12,2) DEFAULT 0.00'],
+    ['total_deductions',       'DECIMAL(12,2) DEFAULT 0.00'],
+    ['net_salary',            'DECIMAL(12,2) DEFAULT 0.00'],
+    ['birth_date',            'DATE'],
+    ['gender',                'VARCHAR(20)'],
+    ['marital_status',        'VARCHAR(30)'],
+    ['nationality',           'VARCHAR(100)'],
+    ['personal_email',        'VARCHAR(255)'],
+    ['permanent_address',     'TEXT'],
+    ['manager_id',            'INT'],
+    ['location',              'VARCHAR(100)'],
+    ['bank_name',             'VARCHAR(100)'],
+    ['ifsc_code',             'VARCHAR(20)'],
+    ['uam_id',                'VARCHAR(50)'],
+    ['about',                 'TEXT'],
+    ['work_passion',          'TEXT'],
+    ['hobbies',               'TEXT'],
+    ['skills',                'TEXT'],
+    ['certifications',        'TEXT'],
+    ['profile_image',         'VARCHAR(255)'],
+  ];
+  for (const [col, def] of empCols) {
+    await addColumnIfMissing(conn, 'employees', col, def);
+  }
+
+  // users new columns
+  await addColumnIfMissing(conn, 'users', 'login_id', 'VARCHAR(50)');
+
+  // time_off_requests new columns
+  await addColumnIfMissing(conn, 'time_off_requests', 'document_path', 'VARCHAR(255)');
+
+
+  // Backfill wage from basic_salary
+  await conn.query(`UPDATE employees SET wage = basic_salary WHERE wage = 0 AND basic_salary > 0`);
+  // Backfill login_id = employee_code on users
+  await conn.query(`UPDATE users u JOIN employees e ON e.user_id = u.id SET u.login_id = e.employee_code WHERE u.login_id IS NULL`);
+  // Backfill standard_allowance_fixed from existing standard_allowance where it's not set
+  await conn.query(`UPDATE employees SET standard_allowance_fixed = 967.00 WHERE standard_allowance_fixed IS NULL OR standard_allowance_fixed = 0`);
+
+  console.log('✅ Migration complete!');
+  await conn.end();
+}
+
+migrate().catch(err => { console.error('❌ Migration failed:', err.message); process.exit(1); });
+
+
+empay-backend\src\routes\employees.js
+
+const express = require('express');
+const router = express.Router();
+const ctrl = require('../controllers/employeesController');
+const { verifyToken, requireRole } = require('../middleware/auth');
+
+router.use(verifyToken);
+
+router.get('/me', ctrl.getMyProfile);
+router.get('/', ctrl.getAll);
+router.get('/:id', ctrl.getOne);
+router.post('/', requireRole('admin', 'hr_officer'), ctrl.create);
+// Salary config — admin & payroll_officer ONLY
+router.put('/:id/salary', requireRole('admin', 'payroll_officer'), ctrl.updateSalary);
+router.post('/:id/upload-image', ctrl.uploadImage);
+router.put('/:id', requireRole('admin', 'hr_officer', 'employee'), ctrl.update);
+router.delete('/:id', requireRole('admin'), ctrl.remove);
+
+module.exports = router;
+
+
+
+
+
+
+empay-backend\src\routes\timeoff.js
+
+const express = require('express');
+const router = express.Router();
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
+const ctrl = require('../controllers/timeoffController');
+const { verifyToken, requireRole } = require('../middleware/auth');
+
+// Multer config — store in uploads/timeoff, keep original extension
+const TIMEOFF_DIR = path.join(__dirname, '..', '..', 'uploads', 'timeoff');
+if (!fs.existsSync(TIMEOFF_DIR)) fs.mkdirSync(TIMEOFF_DIR, { recursive: true });
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    // Ensure directory still exists at upload time
+    if (!fs.existsSync(TIMEOFF_DIR)) fs.mkdirSync(TIMEOFF_DIR, { recursive: true });
+    cb(null, TIMEOFF_DIR);
+  },
+  filename: (req, file, cb) => {
+    const unique = `${Date.now()}-${Math.round(Math.random()*1e6)}`;
+    cb(null, unique + path.extname(file.originalname));
+  },
+});
+const fileFilter = (req, file, cb) => {
+  const allowedExt = /\.(jpeg|jpg|png|gif|pdf|doc|docx)$/i;
+  if (allowedExt.test(path.extname(file.originalname))) {
+    cb(null, true);
+  } else {
+    cb(new Error('Only images (jpg/png/gif), PDF, and Word documents are allowed'));
+  }
+};
+const upload = multer({ storage, fileFilter, limits: { fileSize: 5 * 1024 * 1024 } }); // 5 MB
+
+router.use(verifyToken);
+
+router.get('/my', ctrl.myRequests);
+router.get('/balances/:employee_id', ctrl.getBalances);
+router.get('/balances', ctrl.getBalances);
+router.post('/apply', requireRole('employee'), upload.single('document'), ctrl.apply);
+router.get('/', requireRole('admin', 'hr_officer', 'payroll_officer'), ctrl.allRequests);
+router.put('/:id/approve', requireRole('admin', 'payroll_officer'), ctrl.approve);
+router.put('/:id/reject', requireRole('admin', 'payroll_officer'), ctrl.reject);
+router.post('/allocate', requireRole('admin', 'hr_officer'), ctrl.allocate);
+
+module.exports = router;
+
+
+
+empay-backend\scratch_check_db.js
+
+const db = require('./src/db/connection');
+async function run() {
+  try {
+    const [rows] = await db.execute('SELECT id, first_name, last_name, user_id FROM employees');
+    console.log(JSON.stringify(rows, null, 2));
+    process.exit(0);
+  } catch (err) {
+    console.error(err);
+    process.exit(1);
+  }
+}
+run();
+
+
+
+empay-frontend\scratch\check_balance.py
+
+
+content = open(r"d:\Oddo\odoo-hack-finals\empay-frontend\src\pages\EmployeeProfilePage.jsx", "r", encoding="utf-8").read()
+print(f"Braces: {{: {content.count('{')}, }}: {content.count('}')}")
+print(f"Parens: (: {content.count('(')}, ): {content.count(')')}")
+print(f"Fragments: <>: {content.count('<>')}, </>: {content.count('</>')}")
+
+
+
+empay-frontend\src\pages\EmployeeProfilePage.jsx
+
+
+import { useState, useEffect, useRef } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
+import api from '../utils/api';
+import toast from 'react-hot-toast';
+
+const BACKEND_BASE = ''; // Vite proxies /uploads → backend, so relative URL works
+
+const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) : '—';
+const fmtCurr = (n) => `₹${Number(n||0).toLocaleString('en-IN',{minimumFractionDigits:2})}`;
+const getInitials = (f,l) => `${f?.[0]||''}${l?.[0]||''}`.toUpperCase();
+const getColor = (name) => { const c=['#1e3a8a','#1d4ed8','#059669','#7c3aed','#d97706']; let h=0; for(const ch of(name||''))h=ch.charCodeAt(0)+((h<<5)-h); return c[Math.abs(h)%c.length]; };
+
+function SalaryRow({ label, value, pct, desc, editInput }) {
+  return (
+    <div style={{borderBottom:'1px solid var(--border)',padding:'10px 0'}}>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:3}}>
+        <span style={{fontWeight:600,fontSize:13,color:'var(--text)'}}>{label}</span>
+        <div style={{display:'flex',gap:12,alignItems:'center'}}>
+          {editInput
+            ? editInput
+            : pct && <span style={{fontSize:11,color:'var(--text-3)',background:'var(--surface-2)',padding:'2px 8px',borderRadius:99}}>{pct}%</span>
+          }
+          <span style={{fontWeight:700,fontSize:14,color:'var(--primary)',minWidth:100,textAlign:'right'}}>{fmtCurr(value)} <span style={{fontSize:10,color:'var(--text-4)',fontWeight:400}}>/ month</span></span>
+        </div>
+      </div>
+      {desc && <div style={{fontSize:11,color:'var(--text-3)',marginTop:2}}>{desc}</div>}
+    </div>
+  );
+}
+
+function CameraModal({ onCapture, onClose }) {
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
+  const [stream, setStream] = useState(null);
+
+  useEffect(() => {
+    async function start() {
+      try {
+        const s = await navigator.mediaDevices.getUserMedia({ video: { width: 400, height: 400 } });
+        setStream(s);
+        if (videoRef.current) videoRef.current.srcObject = s;
+      } catch (err) { toast.error("Could not access camera"); onClose(); }
+    }
+    start();
+    return () => { if (stream) stream.getTracks().forEach(t => t.stop()); };
+  }, []);
+
+  const capture = () => {
+    const context = canvasRef.current.getContext('2d');
+    context.drawImage(videoRef.current, 0, 0, 400, 400);
+    canvasRef.current.toBlob(blob => onCapture(blob), 'image/jpeg');
+  };
+
+  return (
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.8)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:2000}}>
+      <div style={{background:'#fff',padding:20,borderRadius:12,textAlign:'center',maxWidth:440}}>
+        <h3 style={{marginBottom:15}}>Take Profile Photo</h3>
+        <video ref={videoRef} autoPlay playsInline style={{width:'100%',borderRadius:8,background:'#000',marginBottom:15}} />
+        <canvas ref={canvasRef} width={400} height={400} style={{display:'none'}} />
+        <div style={{display:'flex',gap:10,justifyContent:'center'}}>
+          <button className="btn btn-primary" onClick={capture}>📸 Capture</button>
+          <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Inline editable text section with pencil toggle
+function InlineEdit({ value, onSave, multiline, canEdit }) {
+  const [ed, setEd] = useState(false);
+  const [v, setV] = useState(value || '');
+  const save = async () => { await onSave(v); setEd(false); };
+  const pencilBtn = { background:'none', border:'none', cursor:'pointer', fontSize:14, color:'var(--text-3)', padding:'2px 6px', lineHeight:1 };
+  if (!canEdit) return <p style={{color:'var(--text-2)',fontSize:13,lineHeight:1.8,margin:0}}>{value || <span style={{color:'var(--text-4)',fontStyle:'italic'}}>Not added.</span>}</p>;
+  if (ed) return (
+    <div>
+      {multiline
+        ? <textarea className="form-control" rows={4} value={v} onChange={e=>setV(e.target.value)} style={{marginBottom:8}} />
+        : <input className="form-control" value={v} onChange={e=>setV(e.target.value)} style={{marginBottom:8}} />
+      }
+      <div style={{display:'flex',gap:8}}>
+        <button className="btn btn-sm btn-primary" onClick={save}>Save</button>
+        <button className="btn btn-sm btn-secondary" onClick={()=>setEd(false)}>Cancel</button>
+      </div>
+    </div>
+  );
+  return (
+    <div style={{display:'flex',alignItems:'flex-start',gap:4}}>
+      <p style={{flex:1,color:'var(--text-2)',fontSize:13,lineHeight:1.8,margin:0}}>{value || <span style={{color:'var(--text-4)',fontStyle:'italic'}}>Not added yet. Click ✏ to add.</span>}</p>
+      <button style={pencilBtn} onClick={()=>{setV(value||'');setEd(true);}}>✏</button>
+    </div>
+  );
+}
+
+export default function EmployeeProfilePage() {
+  const { id } = useParams();
+  const navigate = useNavigate();
+  const { can, user } = useAuth();
+  const [emp, setEmp] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState('resume');
+  const [form, setForm] = useState({});
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [leaveBalances, setLeaveBalances] = useState([]);
+  const [pwForm, setPwForm] = useState({current_password:'',new_password:'',confirm:''});
+  const [pwLoading, setPwLoading] = useState(false);
+  const [salaryEditing, setSalaryEditing] = useState(false);
+  const [salarySaving, setSalarySaving] = useState(false);
+  const [showCamera, setShowCamera] = useState(false);
+  const [uploadingImg, setUploadingImg] = useState(false);
+  const fileInputRef = useRef(null);
+  const [salaryForm, setSalaryForm] = useState({
+    wage: 0,
+    working_days_per_week: 5,
+    basic_pct: 50,
+    hra_pct: 50,
+    standard_allowance_pct: 0,
+    perf_pct: 8.33,
+    lta_pct: 8.33,
+    employee_pf_pct: 12,
+    employer_pf_pct: 12,
+    prof_tax_amount: 200
+  });
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const r = await api.get(`/employees/${id}`);
+      const data = r.data || r;
+      setEmp(data); setForm(data);
+      setSalaryForm({
+        wage: parseFloat(data.wage) || 0,
+        working_days_per_week: data.working_days_per_week || 5,
+        basic_pct: parseFloat(data.basic_pct) || 50,
+        hra_pct: parseFloat(data.hra_pct) || 50,
+        standard_allowance_pct: parseFloat(data.standard_allowance_pct) || 0,
+        perf_pct: parseFloat(data.perf_pct) || 8.33,
+        lta_pct:  parseFloat(data.lta_pct)  || 8.33,
+        employee_pf_pct: parseFloat(data.employee_pf_pct) || 12,
+        employer_pf_pct: parseFloat(data.employer_pf_pct) || 12,
+        prof_tax_amount: parseFloat(data.prof_tax_amount) || 200,
+      });
+      // Only load leave balances for own profile or if admin/HR
+      if (can('admin','hr_officer') || user?.employee_id == id) {
+        const lb = await api.get(`/timeoff/balances/${id}`);
+        setLeaveBalances(lb.data || lb);
+      }
+    } catch (err) {
+      // 403 = employee tried to access another's profile
+      toast.error('Access denied');
+      navigate('/employees');
+    }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { load(); }, [id]);
+
+  const save = async () => {
+    setSaving(true);
+    try { await api.put(`/employees/${id}`, form); toast.success('Saved'); setEditing(false); load(); }
+    catch (err) { toast.error(err.message); }
+    finally { setSaving(false); }
+  };
+
+  const saveSalary = async () => {
+    setSalarySaving(true);
+    try {
+      await api.put(`/employees/${id}/salary`, salaryForm);
+      toast.success('Salary structure updated!');
+      setSalaryEditing(false);
+      load();
+    } catch (err) { toast.error(err?.message || 'Failed to update salary'); }
+    finally { setSalarySaving(false); }
+  };
+
+  const handleImgUpload = async (file) => {
+    if (!file) return;
+    const formData = new FormData();
+    formData.append('image', file);
+    setUploadingImg(true);
+    try {
+      await api.post(`/employees/${id}/upload-image`, formData);
+      toast.success('Profile picture updated!');
+      load();
+    } catch (err) {
+      console.error('Upload error:', err);
+      toast.error(err.message || 'Upload failed. Please try again.');
+    }
+    finally { setUploadingImg(false); setShowCamera(false); }
+  };
+
+  const getSalaryValues = () => {
+    const data = salaryEditing ? salaryForm : {
+      wage: emp.wage,
+      basic_pct: emp.basic_pct,
+      hra_pct: emp.hra_pct,
+      standard_allowance_pct: emp.standard_allowance_pct,
+      perf_pct: emp.perf_pct,
+      lta_pct: emp.lta_pct,
+      employee_pf_pct: emp.employee_pf_pct,
+      employer_pf_pct: emp.employer_pf_pct,
+      prof_tax_amount: emp.prof_tax_amount
+    };
+
+    const w   = parseFloat(data.wage) || 0;
+    const bp  = parseFloat(data.basic_pct) || 0;
+    const hp  = parseFloat(data.hra_pct) || 0;
+    const sp  = parseFloat(data.standard_allowance_pct) || 0;
+    const pp  = parseFloat(data.perf_pct) || 0;
+    const lp  = parseFloat(data.lta_pct) || 0;
+    const ep  = parseFloat(data.employee_pf_pct) || 12;
+    const erp = parseFloat(data.employer_pf_pct) || 12;
+    const pt  = parseFloat(data.prof_tax_amount) || 0;
+
+    const basic = Math.round(w * (bp / 100) * 100) / 100;
+    const hra   = Math.round(basic * (hp / 100) * 100) / 100;
+    const std   = Math.round(basic * (sp / 100) * 100) / 100;
+    const perf  = Math.round(basic * (pp / 100) * 100) / 100;
+    const lta   = Math.round(basic * (lp / 100) * 100) / 100;
+    const ePf   = Math.round(basic * (ep / 100) * 100) / 100;
+    const rPf   = Math.round(basic * (erp / 100) * 100) / 100;
+
+    const earnBeforeFixed = basic + hra + std + perf + lta;
+    const fixed = Math.round((w - earnBeforeFixed) * 100) / 100;
+    const gross = Math.round((earnBeforeFixed + fixed) * 100) / 100;
+    const deds  = Math.round((ePf + pt) * 100) / 100;
+    const net   = Math.round((gross - deds) * 100) / 100;
+
+    return { w, bp, hp, sp, pp, lp, ep, erp, pt, basic, hra, std, perf, lta, ePf, rPf, fixed, gross, deds, net };
+  };
+
+  const sf = (k, v) => setSalaryForm(p => ({ ...p, [k]: v }));
+
+  const changePw = async (e) => {
+    e.preventDefault();
+    if (pwForm.new_password !== pwForm.confirm) { toast.error('Passwords do not match'); return; }
+    setPwLoading(true);
+    try { await api.put('/auth/change-password', { current_password:pwForm.current_password, new_password:pwForm.new_password }); toast.success('Password changed!'); setPwForm({current_password:'',new_password:'',confirm:''}); }
+    catch (err) { toast.error(err.message); }
+    finally { setPwLoading(false); }
+  };
+
+  const f = (k,v) => setForm(p=>({...p,[k]:v}));
+  const canEdit = can('admin','hr_officer') || (user?.employee_id == id);
+  const canSeePrivate = can('admin','hr_officer') || (user?.employee_id == id);
+  const canSeeSalary = can('admin','payroll_officer','hr_officer');
+  const canEditSalary = can('admin','payroll_officer');
+  const isOwnProfile = user?.employee_id == id;
+  const isEmployee = user?.role === 'employee';
+
+  // Tab visibility rules:
+  // - Admin/HR: all tabs
+  // - Employee (own profile): Resume + Security only
+  // - Employee (other's profile): blocked at backend, but guard here too
+  const tabs = [
+    { id: 'resume',  label: 'Resume' },
+    ...(canSeePrivate ? [{ id: 'private', label: 'Private Info' }] : []),
+    ...(canSeeSalary ? [{ id: 'salary', label: 'Salary Info' }] : []),
+    ...(isOwnProfile ? [{ id: 'security', label: 'Security' }] : []),
+  ];
+
+  if (loading) return <div className="page-loader" style={{height:300,background:'transparent'}}><div className="spinner"/></div>;
+  if (!emp) return null;
+
+  const color = getColor(`${emp.first_name} ${emp.last_name}`);
+  const wage = parseFloat(emp.wage) || parseFloat(emp.basic_salary) || 0;
+  const basic = Math.round(wage*0.50*100)/100;
+  const hra   = Math.round(basic*0.40*100)/100;
+  const std   = 967;
+  const perf  = Math.round(basic*0.0933*100)/100;
+  const lta   = Math.round(basic*0.0933*100)/100;
+  const fixed = Math.round((wage-basic-hra-std-perf-lta)*100)/100;
+  const pfEmp = Math.round(basic*0.12*100)/100;
+  const pfEr  = Math.round(basic*0.12*100)/100;
+  const profTax = wage > 15000 ? 200 : 0;
+
+  // Field render helper
+  const Field = ({label, value}) => (
+    <div style={{marginBottom:16}}>
+      <div style={{fontSize:11,fontWeight:700,color:'var(--text-3)',textTransform:'uppercase',letterSpacing:'0.06em',marginBottom:4}}>{label}</div>
+      <div style={{fontSize:14,color:'var(--text)',fontWeight:500}}>{value||'—'}</div>
+    </div>
+  );
+
+  const InputField = ({label, k, type='text', required}) => (
+    <div className="form-group">
+      <label className="form-label">{label}{required&&'*'}</label>
+      <input className="form-control" type={type} value={form[k]?.toString?.()?.split?.('T')?.[0]||form[k]||''} onChange={e=>f(k,e.target.value)} />
+    </div>
+  );
+
+  const saveField = async (field, val) => {
+    try { await api.put(`/employees/${id}`, { [field]: val }); setEmp(p=>({...p,[field]:val})); toast.success('Saved!'); }
+    catch(e) { toast.error(e.message); }
+  };
+
+  const LF = ({label, value}) => (
+    <div style={{marginBottom:14}}>
+      <div style={{fontSize:11,fontWeight:700,color:'var(--text-3)',textTransform:'uppercase',letterSpacing:'0.06em',marginBottom:3}}>{label}</div>
+      <div style={{fontSize:13,fontWeight:500,color:'var(--text)',borderBottom:'1px solid var(--border)',paddingBottom:6}}>{value||'—'}</div>
+    </div>
+  );
+
+  return (
+    <div>
+      <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:16}}>
+        <button className="btn btn-ghost btn-sm" onClick={()=>navigate('/employees')}>← Back</button>
+      </div>
+
+      {/* ── WIREFRAME HEADER ── */}
+      <div className="card" style={{marginBottom:20}}>
+        <div className="card-body" style={{display:'flex',gap:28,alignItems:'flex-start',flexWrap:'wrap',padding:'24px 28px'}}>
+          {/* Photo */}
+          <div style={{position:'relative',flexShrink:0}}>
+            <div style={{width:100,height:100,borderRadius:'50%',overflow:'hidden',border:'3px solid var(--primary-light)',background:color,display:'flex',alignItems:'center',justifyContent:'center',fontSize:34,fontWeight:700,color:'#fff'}}>
+              {emp.profile_image
+                ? <img src={emp.profile_image} alt="profile" style={{width:'100%',height:'100%',objectFit:'cover'}} />
+                : getInitials(emp.first_name,emp.last_name)}
+            </div>
+            {isOwnProfile && (
+              <>
+                <button onClick={()=>fileInputRef.current?.click()} title="Upload Photo"
+                  style={{position:'absolute',bottom:2,right:2,width:28,height:28,borderRadius:'50%',background:'var(--primary)',color:'#fff',border:'2px solid #fff',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',fontSize:13}}>
+                  {uploadingImg?'…':'✏'}
+                </button>
+                <input type="file" ref={fileInputRef} style={{display:'none'}} accept="image/*" onChange={e=>handleImgUpload(e.target.files[0])} />
+              </>
+            )}
+          </div>
+
+          {/* Name + Contact */}
+          <div style={{flex:1,minWidth:180}}>
+            <h1 style={{fontSize:26,fontWeight:800,margin:'0 0 14px',color:'var(--text)'}}>{emp.first_name} {emp.last_name}</h1>
+            {[['Login ID', emp.login_id||emp.employee_code],['Email', emp.email],['Mobile', emp.phone]].map(([l,v])=>(
+              <div key={l} style={{display:'flex',gap:12,fontSize:13,marginBottom:8,borderBottom:'1px solid var(--border)',paddingBottom:6}}>
+                <span style={{color:'var(--text-3)',minWidth:70,fontWeight:600}}>{l}</span>
+                <span style={{color:'var(--text-2)'}}>{v||'—'}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* Company Info */}
+          <div style={{minWidth:200,flexShrink:0}}>
+            {[['Company','EmPay Technologies'],['Department',emp.department],['Manager',emp.manager_first_name?`${emp.manager_first_name} ${emp.manager_last_name}`:'—'],['Location',emp.location]].map(([l,val])=>(
+              <LF key={l} label={l} value={val} />
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* ── TABS ── */}
+      <div style={{display:'flex',borderBottom:'2px solid var(--border)',marginBottom:20}}>
+        {tabs.map(t=>(
+          <button key={t.id} onClick={()=>setTab(t.id)} style={{padding:'12px 24px',background:'none',border:'none',cursor:'pointer',fontSize:14,fontWeight:600,color:tab===t.id?'var(--primary)':'var(--text-3)',borderBottom:`2px solid ${tab===t.id?'var(--primary)':'transparent'}`,marginBottom:-2,transition:'all 0.2s'}}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* ── RESUME TAB (wireframe layout) ── */}
+      {tab==='resume' && (
+              <div style={{display:'grid',gridTemplateColumns:'1fr 300px',gap:20}}>
+                {/* Left column */}
+                <div>
+                  {[{key:'about',label:'About'},{key:'work_passion',label:'What I love about my job'},{key:'hobbies',label:'My interests and hobbies'}].map(({key,label})=>(
+                    <div key={key} className="card" style={{marginBottom:16}}>
+                      <div className="card-body">
+                        <h3 style={{fontSize:15,fontWeight:700,marginBottom:10,color:'var(--text)'}}>{label}</h3>
+                        <InlineEdit value={emp[key]} onSave={v=>saveField(key,v)} multiline canEdit={canEdit} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                {/* Right column */}
+                <div>
+                  <div className="card" style={{marginBottom:16}}>
+                    <div className="card-header"><div className="card-title">Skills</div></div>
+                    <div className="card-body">
+                      <div style={{display:'flex',flexWrap:'wrap',gap:8,marginBottom:8}}>
+                        {(emp.skills||'').split(',').filter(s=>s.trim()).map(s=>(
+                          <span key={s} style={{background:'var(--primary-xlight)',color:'var(--primary)',fontSize:12,fontWeight:600,padding:'4px 12px',borderRadius:99,border:'1px solid var(--primary-light)'}}>{s.trim()}</span>
+                        ))}
+                        {!emp.skills && <span style={{color:'var(--text-4)',fontSize:13}}>No skills added</span>}
+                      </div>
+                      {canEdit && <InlineEdit value={emp.skills} onSave={v=>saveField('skills',v)} canEdit={canEdit} />}
+                    </div>
+                  </div>
+                  <div className="card">
+                    <div className="card-header"><div className="card-title">Certification</div></div>
+                    <div className="card-body">
+                      <div style={{marginBottom:8}}>
+                        {(emp.certifications||'').split('\n').filter(s=>s.trim()).map((c,i)=>(
+                          <div key={i} style={{display:'flex',gap:8,padding:'5px 0',borderBottom:'1px solid var(--border)',fontSize:13,color:'var(--text-2)'}}>🏅 {c.trim()}</div>
+                        ))}
+                        {!emp.certifications && <span style={{color:'var(--text-4)',fontSize:13}}>No certifications added</span>}
+                      </div>
+                      {canEdit && <InlineEdit value={emp.certifications} onSave={v=>saveField('certifications',v)} multiline canEdit={canEdit} />}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+      {/* ── PRIVATE INFO TAB ── */}
+      {tab==='private' && canSeePrivate && (
+        <div className="card">
+          <div className="card-header">
+            <div className="card-title">Private Information</div>
+            {canEdit && (editing
+              ? <div style={{display:'flex',gap:8}}><button className="btn btn-primary btn-sm" onClick={save} disabled={saving}>{saving?'Saving...':'Save'}</button><button className="btn btn-secondary btn-sm" onClick={()=>{setEditing(false);setForm(emp);}}>Cancel</button></div>
+              : <button className="btn btn-outline btn-sm" onClick={()=>setEditing(true)}>✏ Edit</button>
+            )}
+          </div>
+          <div className="card-body">
+          <>
+                <div style={{fontSize:11,fontWeight:700,color:'var(--text-3)',textTransform:'uppercase',letterSpacing:'0.06em',marginBottom:16}}>Personal Details</div>
+                {editing ? (
+                  <>
+                    <div className="form-row">
+                      <InputField label="Date of Birth" k="birth_date" type="date" />
+                      <div className="form-group"><label className="form-label">Gender</label>
+                        <select className="form-control" value={form.gender||''} onChange={e=>f('gender',e.target.value)}>
+                          <option value="">Select...</option>
+                          {['Male','Female','Other','Prefer not to say'].map(g=><option key={g}>{g}</option>)}
+                        </select>
+                      </div>
+                    </div>
+                    <div className="form-row">
+                      <InputField label="Nationality" k="nationality" />
+                      <div className="form-group"><label className="form-label">Marital Status</label>
+                        <select className="form-control" value={form.marital_status||''} onChange={e=>f('marital_status',e.target.value)}>
+                          <option value="">Select...</option>
+                          {['Single','Married','Divorced','Widowed'].map(m=><option key={m}>{m}</option>)}
+                        </select>
+                      </div>
+                    </div>
+                    <InputField label="Personal Email" k="personal_email" type="email" />
+                    <div className="form-group"><label className="form-label">Permanent Address</label><textarea className="form-control" rows={2} value={form.permanent_address||''} onChange={e=>f('permanent_address',e.target.value)} /></div>
+                  </>
+                ) : (
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'0 24px'}}>
+                    <Field label="Date of Birth" value={fmtDate(emp.birth_date)} />
+                    <Field label="Gender" value={emp.gender} />
+                    <Field label="Nationality" value={emp.nationality} />
+                    <Field label="Marital Status" value={emp.marital_status} />
+                    <Field label="Personal Email" value={emp.personal_email} />
+                    <Field label="Date of Joining" value={fmtDate(emp.date_of_joining)} />
+                  </div>
+                )}
+                {!editing && <Field label="Permanent Address" value={emp.permanent_address} />}
+                <hr className="divider"/>
+                <div style={{fontSize:11,fontWeight:700,color:'var(--text-3)',textTransform:'uppercase',letterSpacing:'0.06em',marginBottom:16}}>Bank Details</div>
+                {editing ? (
+                  <>
+                    <div className="form-row">
+                      <InputField label="Account Number" k="bank_account" />
+                      <InputField label="Bank Name" k="bank_name" />
+                    </div>
+                    <div className="form-row">
+                      <InputField label="IFSC Code" k="ifsc_code" />
+                      <InputField label="PAN Number" k="pan_number" />
+                    </div>
+                    <div className="form-row">
+                      <InputField label="UAN Number" k="uan_number" />
+                      <InputField label="UAM ID" k="uam_id" />
+                    </div>
+                  </>
+                ) : (
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'0 24px'}}>
+                    <Field label="Account Number" value={emp.bank_account} />
+                    <Field label="Bank Name" value={emp.bank_name} />
+                    <Field label="IFSC Code" value={emp.ifsc_code} />
+                    <Field label="PAN Number" value={emp.pan_number} />
+                    <Field label="UAN Number" value={emp.uan_number} />
+                    <Field label="UAM ID" value={emp.uam_id} />
+                    <Field label="Employee Code" value={emp.employee_code} />
+                  </div>
+                )}
+          </>
+          </div>
+        </div>
+      )}
+      {/* ── SALARY TAB ── */}
+            {tab==='salary' && canSeeSalary && (() => {
+              const v = getSalaryValues();
+              const dWpw = salaryEditing ? (salaryForm.working_days_per_week||5) : (emp.working_days_per_week||5);
+
+              const EditPct = ({ k }) => (
+                <div style={{display:'flex',alignItems:'center',gap:4}}>
+                  <input type="number" min="0" max="100" step="0.01" value={salaryForm[k]}
+                    onChange={e=>sf(k,e.target.value)}
+                    style={{width:64,padding:'2px 6px',fontSize:12,border:'1px solid var(--primary)',borderRadius:6,textAlign:'right'}} />
+                  <span style={{fontSize:12,color:'var(--text-3)'}}>%</span>
+                </div>
+              );
+
+              return (
+                <>
+                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}>
+                    <div>
+                      <div style={{fontSize:13,fontWeight:700,color:'var(--text)'}}>Salary Structure</div>
+                      <div style={{fontSize:11,color:'var(--text-3)'}}>Formula-based dynamic computation</div>
+                    </div>
+                    {canEditSalary && (
+                      salaryEditing
+                        ? <div style={{display:'flex',gap:8}}>
+                            <button className="btn btn-primary btn-sm" onClick={saveSalary} disabled={salarySaving}>{salarySaving?'Saving...':'💾 Save Changes'}</button>
+                            <button className="btn btn-secondary btn-sm" onClick={()=>{setSalaryEditing(false); load();}}>Cancel</button>
+                          </div>
+                        : <button className="btn btn-outline btn-sm" onClick={()=>setSalaryEditing(true)}>✏ Edit Parameters</button>
+                    )}
+                  </div>
+
+                  {/* Top Stats Cards */}
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:16,marginBottom:20}}>
+                    <div style={{background:'var(--primary-xlight)',border:'1px solid var(--primary-light)',borderRadius:'var(--radius)',padding:'14px 18px'}}>
+                      <div style={{fontSize:11,fontWeight:700,color:'var(--primary)',textTransform:'uppercase',marginBottom:6}}>Month Wage</div>
+                      {salaryEditing
+                        ? <input className="form-control" type="number" min="0" value={salaryForm.wage} onChange={e=>sf('wage',e.target.value)} />
+                        : <div style={{fontSize:22,fontWeight:800,color:'var(--primary)'}}>{fmtCurr(v.w)}</div>}
+                    </div>
+                    <div style={{background:'var(--surface-2)',border:'1px solid var(--border)',borderRadius:'var(--radius)',padding:'14px 18px'}}>
+                      <div style={{fontSize:11,fontWeight:700,color:'var(--text-3)',textTransform:'uppercase',marginBottom:6}}>Annual Salary</div>
+                      <div style={{fontSize:18,fontWeight:700,color:'var(--text)'}}>{fmtCurr(v.w * 12)}</div>
+                    </div>
+                    <div style={{background:'var(--surface-2)',border:'1px solid var(--border)',borderRadius:'var(--radius)',padding:'14px 18px'}}>
+                      <div style={{fontSize:11,fontWeight:700,color:'var(--text-3)',textTransform:'uppercase',marginBottom:6}}>Working Days</div>
+                      {salaryEditing
+                        ? <input className="form-control" type="number" min="1" max="7" value={salaryForm.working_days_per_week} onChange={e=>sf('working_days_per_week',e.target.value)} />
+                        : <div style={{fontSize:18,fontWeight:700,color:'var(--text)'}}>{dWpw} <span style={{fontSize:11,color:'var(--text-3)'}}>days/week</span></div>}
+                    </div>
+                  </div>
+
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:24}}>
+                    {/* EARNINGS SECTION */}
+                    <div>
+                      <div style={{fontSize:12,fontWeight:700,color:'var(--primary)',textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:12,borderBottom:'2px solid var(--primary-light)',paddingBottom:4}}>Earnings</div>
+                      
+                      <SalaryRow label="Basic Salary" value={v.basic} pct={v.bp} desc={`${v.bp}% of Monthly Wage`} 
+                        editInput={salaryEditing && <EditPct k="basic_pct" />} />
+                      
+                      <SalaryRow label="House Rent Allowance" value={v.hra} pct={v.hp} desc={`${v.hp}% of Basic Salary`}
+                        editInput={salaryEditing && <EditPct k="hra_pct" />} />
+                      
+                      <SalaryRow label="Standard Allowance" value={v.std} pct={v.sp} desc={`${v.sp}% of Basic Salary`}
+                        editInput={salaryEditing && <EditPct k="standard_allowance_pct" />} />
+                      
+                      <SalaryRow label="Performance Bonus" value={v.perf} pct={v.pp} desc={`${v.pp}% of Basic Salary`}
+                        editInput={salaryEditing && <EditPct k="perf_pct" />} />
+                      
+                      <SalaryRow label="Leave Travel Allowance" value={v.lta} pct={v.lp} desc={`${v.lp}% of Basic Salary`}
+                        editInput={salaryEditing && <EditPct k="lta_pct" />} />
+                      
+                      <SalaryRow label="Fixed Allowance" value={v.fixed} desc="Balancing Component" />
+
+                      <div style={{display:'flex',justifyContent:'space-between',padding:'14px 0',fontWeight:800,fontSize:16,color:'var(--primary)',borderTop:'2px solid var(--primary)',marginTop:8}}>
+                        <span>Gross Salary</span><span>{fmtCurr(v.gross)}</span>
+                      </div>
+                    </div>
+
+                    {/* DEDUCTIONS SECTION */}
+                    <div>
+                      <div style={{fontSize:12,fontWeight:700,color:'var(--danger)',textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:12,borderBottom:'2px solid var(--danger-light)',paddingBottom:4}}>Deductions</div>
+                      
+                      <SalaryRow label="Employee PF" value={v.ePf} pct={v.ep} desc={`${v.ep}% of Basic Salary`}
+                        editInput={salaryEditing && <EditPct k="employee_pf_pct" />} />
+                      
+                      <SalaryRow label="Professional Tax" value={v.pt} desc="Flat deduction"
+                        editInput={salaryEditing && (
+                          <div style={{display:'flex',alignItems:'center',gap:4}}>
+                            <span style={{fontSize:12,color:'var(--text-3)'}}>₹</span>
+                            <input type="number" min="0" value={salaryForm.prof_tax_amount}
+                              onChange={e=>sf('prof_tax_amount',e.target.value)}
+                              style={{width:80,padding:'2px 6px',fontSize:12,border:'1px solid var(--primary)',borderRadius:6,textAlign:'right'}} />
+                          </div>
+                        )} />
+                      
+                      <div style={{marginTop:20,paddingTop:12,borderTop:'1px solid var(--border)'}}>
+                        <div style={{fontSize:12,fontWeight:700,color:'var(--text-3)',textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:12,borderBottom:'2px solid var(--border)',paddingBottom:4}}>Contributions (Non-Gross)</div>
+                        <SalaryRow label="Employer PF" value={v.rPf} pct={v.erp} desc={`${v.erp}% of Basic Salary`}
+                          editInput={salaryEditing && <EditPct k="employer_pf_pct" />} />
+                      </div>
+
+                      <div style={{display:'flex',justifyContent:'space-between',padding:'14px 0',fontWeight:800,fontSize:16,color:'var(--danger)',borderTop:'2px solid var(--danger-light)',marginTop:8}}>
+                        <span>Total Deductions</span><span>{fmtCurr(v.deds)}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{background:'var(--primary)',color:'#fff',borderRadius:'var(--radius)',padding:'20px 24px',display:'flex',justifyContent:'space-between',marginTop:24,boxShadow:'0 10px 15px -3px rgba(0,0,0,0.1)'}}>
+                    <div>
+                      <div style={{fontSize:12,fontWeight:600,opacity:0.8,textTransform:'uppercase',letterSpacing:'0.05em'}}>Net Salary (Take-home)</div>
+                      <div style={{fontSize:28,fontWeight:800}}>{fmtCurr(v.net)}</div>
+                    </div>
+                    <div style={{textAlign:'right'}}>
+                      <div style={{fontSize:12,fontWeight:600,opacity:0.8,textTransform:'uppercase',letterSpacing:'0.05em'}}>Annual Net</div>
+                      <div style={{fontSize:22,fontWeight:700}}>{fmtCurr(v.net * 12)}</div>
+                    </div>
+                  </div>
+                </>
+              );
+            })()}
+
+      {/* ── SECURITY TAB ── */}
+      {tab==='security' && isOwnProfile && (
+        <div className="card">
+          <div className="card-body">
+            <div style={{marginBottom:20,padding:'14px 16px',background:'var(--surface-2)',border:'1px solid var(--border)',borderRadius:'var(--radius)'}}>
+              <div style={{fontSize:11,fontWeight:700,color:'var(--text-3)',textTransform:'uppercase',letterSpacing:'0.06em',marginBottom:4}}>Login ID (auto-generated)</div>
+              <code style={{fontSize:18,fontWeight:800,color:'var(--primary)'}}>{emp.login_id||emp.employee_code}</code>
+              <div style={{fontSize:11,color:'var(--text-3)',marginTop:4}}>This is your unique identifier. Login uses email address.</div>
+            </div>
+            <div style={{fontSize:13,fontWeight:700,color:'var(--text)',marginBottom:16}}>Change Password</div>
+            <form onSubmit={changePw}>
+              <div className="form-group"><label className="form-label">Current Password</label><input className="form-control" type="password" value={pwForm.current_password} onChange={e=>setPwForm(p=>({...p,current_password:e.target.value}))} required /></div>
+              <div className="form-group"><label className="form-label">New Password</label><input className="form-control" type="password" value={pwForm.new_password} onChange={e=>setPwForm(p=>({...p,new_password:e.target.value}))} required /></div>
+              <div className="form-group"><label className="form-label">Confirm Password</label><input className="form-control" type="password" value={pwForm.confirm} onChange={e=>setPwForm(p=>({...p,confirm:e.target.value}))} required /></div>
+              <button type="submit" className="btn btn-primary" disabled={pwLoading}>{pwLoading?'Updating...':'Update Password'}</button>
+            </form>
+          </div>
+        </div>
+      )}
+      {showCamera && <CameraModal onCapture={handleImgUpload} onClose={()=>setShowCamera(false)} />}
+    </div>
+  );
+}
+
+
+
+empay-frontend\src\pages\EmployeesPage.jsx
+import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
+import api from '../utils/api';
+import { sendCredentialsEmail } from '../utils/emailService';
+import toast from 'react-hot-toast';
+
+const getInitials = (f, l) => `${f?.[0]||''}${l?.[0]||''}`.toUpperCase();
+const getColor = (name) => {
+  const c = ['#1e3a8a','#1d4ed8','#059669','#7c3aed','#d97706','#0369a1','#dc2626'];
+  let h = 0; for (const ch of (name||'')) h = ch.charCodeAt(0) + ((h<<5)-h);
+  return c[Math.abs(h)%c.length];
+};
+
+// Status indicator — exactly as per mockup
+function StatusDot({ emp }) {
+  if (emp.on_leave_today) {
+    return (
+      <span title="On Leave" style={{
+        position:'absolute', top:12, right:12, fontSize:16, lineHeight:1,
+      }}>✈️</span>
+    );
+  }
+  if (emp.today_attendance === 'present') {
+    return (
+      <span title="Present" style={{
+        position:'absolute', top:14, right:14, width:12, height:12, borderRadius:'50%',
+        background:'#22c55e', display:'inline-block', boxShadow:'0 0 0 2px #fff, 0 0 0 3px #22c55e',
+      }} />
+    );
+  }
+  // Absent (yellow)
+  return (
+    <span title="Absent" style={{
+      position:'absolute', top:14, right:14, width:12, height:12, borderRadius:'50%',
+      background:'#eab308', display:'inline-block', boxShadow:'0 0 0 2px #fff, 0 0 0 3px #eab308',
+    }} />
+  );
+}
+
+function EmployeeModal({ employee, onClose, onSave }) {
+  const isNew = !employee?.id;
+  const [form, setForm] = useState(employee || {
+    email:'', role:'employee', first_name:'', last_name:'', department:'', designation:'',
+    date_of_joining:'', phone:'', address:'', pan_number:'', uan_number:'', bank_account:'',
+    bank_name:'', ifsc_code:'', uam_id:'', wage:0, location:'',
+  });
+  const [loading, setLoading] = useState(false);
+  const [created, setCreated] = useState(null); // holds {employee_code, email, temp_password}
+  const [emailSending, setEmailSending] = useState(false);
+
+  const f = (k,v) => setForm(p=>({...p,[k]:v}));
+  const DEPTS = ['Engineering','Marketing','Finance','Human Resources','Sales','Design','Operations','Legal'];
+  const ROLES = [['employee','Employee'],['hr_officer','HR Officer'],['payroll_officer','Payroll Officer'],['admin','Admin']];
+
+  const save = async (e) => {
+    e.preventDefault(); setLoading(true);
+    try {
+      if (isNew) {
+        const r = await api.post('/employees', form);
+        toast.success('Employee created!');
+        setCreated(r.data);
+      } else {
+        await api.put(`/employees/${employee.id}`, form);
+        toast.success('Updated!'); onSave();
+      }
+    } catch (err) { toast.error(err.message); }
+    finally { setLoading(false); }
+  };
+
+  const sendMail = async () => {
+    if (!created) return;
+    setEmailSending(true);
+    const result = await sendCredentialsEmail({
+      toName: `${form.first_name} ${form.last_name}`,
+      toEmail: created.email,
+      loginId: created.login_id || created.employee_code,
+      password: created.temp_password,
+    });
+    if (result.success) toast.success('Credentials email sent!');
+    else if (result.reason === 'not_configured') toast.error('Configure EmailJS in .env to send emails');
+    else toast.error('Email failed: ' + result.reason);
+    setEmailSending(false);
+  };
+
+  if (created) return (
+    <div className="modal-overlay">
+      <div className="modal">
+        <div className="modal-header"><span className="modal-title">✅ Employee Created</span></div>
+        <div className="modal-body">
+          <div style={{background:'var(--success-light)',border:'1px solid var(--success)',borderRadius:'var(--radius)',padding:'16px 20px',marginBottom:16}}>
+            <div style={{fontWeight:700,color:'var(--success)',marginBottom:8}}>Account Credentials</div>
+            {[['Name',`${form.first_name} ${form.last_name}`],['Login ID',created.login_id||created.employee_code],['Email',created.email],['Temp Password',created.temp_password]].map(([k,v])=>(
+              <div key={k} style={{display:'flex',gap:12,marginBottom:6,fontSize:13}}>
+                <span style={{color:'var(--text-3)',minWidth:100}}>{k}</span>
+                <strong style={{color:'var(--text)',fontFamily:'monospace'}}>{v}</strong>
+              </div>
+            ))}
+          </div>
+          <div className="alert-info" style={{fontSize:12,color:'var(--text-3)'}}>
+            Make sure to share these credentials with the employee. Click "Send Mail" to email them directly.
+          </div>
+        </div>
+        <div className="modal-footer">
+          <button className="btn btn-primary" onClick={sendMail} disabled={emailSending}>
+            {emailSending ? 'Sending...' : '📧 Send Credentials Email'}
+          </button>
+          <button className="btn btn-secondary" onClick={() => { onSave(); onClose(); }}>Done</button>
+        </div>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div className="modal modal-lg">
+        <div className="modal-header">
+          <span className="modal-title">{isNew?'+ New Employee':'Edit Employee'}</span>
+          <button className="modal-close" onClick={onClose}>✕</button>
+        </div>
+        <form onSubmit={save}>
+          <div className="modal-body">
+            <div style={{fontSize:11,fontWeight:700,color:'var(--text-3)',textTransform:'uppercase',letterSpacing:'0.06em',marginBottom:12}}>Personal Information</div>
+            <div className="form-row">
+              <div className="form-group"><label className="form-label">First Name*</label><input className="form-control" value={form.first_name} onChange={e=>f('first_name',e.target.value)} required /></div>
+              <div className="form-group"><label className="form-label">Last Name*</label><input className="form-control" value={form.last_name} onChange={e=>f('last_name',e.target.value)} required /></div>
+            </div>
+            {isNew && (
+              <div className="form-row">
+                <div className="form-group"><label className="form-label">Email*</label><input className="form-control" type="email" value={form.email} onChange={e=>f('email',e.target.value)} required /></div>
+                <div className="form-group"><label className="form-label">Role</label>
+                  <select className="form-control" value={form.role} onChange={e=>f('role',e.target.value)}>
+                    {ROLES.map(([v,l])=><option key={v} value={v}>{l}</option>)}
+                  </select>
+                </div>
+              </div>
+            )}
+            <div className="form-row">
+              <div className="form-group"><label className="form-label">Department</label>
+                <select className="form-control" value={form.department} onChange={e=>f('department',e.target.value)}>
+                  <option value="">Select...</option>
+                  {DEPTS.map(d=><option key={d}>{d}</option>)}
+                </select>
+              </div>
+              <div className="form-group"><label className="form-label">Designation</label><input className="form-control" value={form.designation||''} onChange={e=>f('designation',e.target.value)} /></div>
+            </div>
+            <div className="form-row">
+              <div className="form-group"><label className="form-label">Date of Joining</label><input className="form-control" type="date" value={form.date_of_joining||''} onChange={e=>f('date_of_joining',e.target.value)} /></div>
+              <div className="form-group"><label className="form-label">Phone</label><input className="form-control" value={form.phone||''} onChange={e=>f('phone',e.target.value)} /></div>
+            </div>
+            <div className="form-group"><label className="form-label">Address</label><textarea className="form-control" value={form.address||''} onChange={e=>f('address',e.target.value)} rows={2} /></div>
+            <hr className="divider" />
+            <div style={{fontSize:11,fontWeight:700,color:'var(--text-3)',textTransform:'uppercase',letterSpacing:'0.06em',marginBottom:12}}>Financial</div>
+            <div className="form-row">
+              <div className="form-group">
+                <label className="form-label">Monthly Wage (₹) — all components auto-calculated</label>
+                <input className="form-control" type="number" value={form.wage||''} onChange={e=>f('wage',e.target.value)} placeholder="e.g. 50000" />
+              </div>
+              <div className="form-group"><label className="form-label">PAN Number</label><input className="form-control" value={form.pan_number||''} onChange={e=>f('pan_number',e.target.value)} /></div>
+            </div>
+            <div className="form-row">
+              <div className="form-group"><label className="form-label">Bank Account</label><input className="form-control" value={form.bank_account||''} onChange={e=>f('bank_account',e.target.value)} /></div>
+              <div className="form-group"><label className="form-label">Bank Name</label><input className="form-control" value={form.bank_name||''} onChange={e=>f('bank_name',e.target.value)} /></div>
+            </div>
+          </div>
+          <div className="modal-footer">
+            <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
+            <button type="submit" className="btn btn-primary" disabled={loading}>{loading?'Saving...':isNew?'Create Employee':'Save'}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+export default function EmployeesPage() {
+  const { can } = useAuth();
+  const navigate = useNavigate();
+  const [employees, setEmployees] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
+  const [dept, setDept] = useState('');
+  const [modal, setModal] = useState(null);
+  const [viewMode, setViewMode] = useState('grid');
+
+  const load = () => {
+    setLoading(true);
+    api.get('/employees').then(r => setEmployees(Array.isArray(r) ? r : r || [])).catch(()=>{}).finally(()=>setLoading(false));
+  };
+  useEffect(() => {
+    load();
+    // Real-time: refresh every 30s so status dots update when employees check in/out
+    const interval = setInterval(() => {
+      api.get('/employees').then(r => setEmployees(Array.isArray(r) ? r : r || [])).catch(()=>{});
+    }, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const depts = [...new Set(employees.map(e=>e.department).filter(Boolean))];
+  const filtered = employees.filter(e=>{
+    const q = search.toLowerCase();
+    return (!q||`${e.first_name} ${e.last_name} ${e.employee_code} ${e.email}`.toLowerCase().includes(q)) &&
+           (!dept||e.department===dept);
+  });
+
+  const handleDelete = async (id) => {
+    if(!confirm('Delete this employee?')) return;
+    try { await api.delete(`/employees/${id}`); toast.success('Deleted'); load(); }
+    catch(err){ toast.error(err.message); }
+  };
+
+  return (
+    <div>
+      <div className="page-header">
+        <div className="page-header-row">
+          <div><h1>Employees</h1><p>{employees.length} total employees</p></div>
+          <div style={{display:'flex',gap:10}}>
+            {can('admin','hr_officer') && <button className="btn btn-primary" onClick={()=>setModal('new')}>+ New Employee</button>}
+          </div>
+        </div>
+      </div>
+
+      <div className="filter-bar">
+        <div className="search-input">
+          <span className="icon">🔍</span>
+          <input className="form-control" placeholder="Search name, code, email..." value={search} onChange={e=>setSearch(e.target.value)} style={{paddingLeft:36,width:260}} />
+        </div>
+        <select className="form-control" style={{width:180}} value={dept} onChange={e=>setDept(e.target.value)}>
+          <option value="">All Departments</option>
+          {depts.map(d=><option key={d}>{d}</option>)}
+        </select>
+        <div style={{marginLeft:'auto',display:'flex',gap:6}}>
+          <button className={`btn btn-sm ${viewMode==='grid'?'btn-primary':'btn-secondary'}`} onClick={()=>setViewMode('grid')}>⊞</button>
+          <button className={`btn btn-sm ${viewMode==='list'?'btn-primary':'btn-secondary'}`} onClick={()=>setViewMode('list')}>☰</button>
+        </div>
+      </div>
+
+      {loading ? <div className="page-loader" style={{height:300,background:'transparent'}}><div className="spinner"/></div>
+      : filtered.length===0 ? <div className="empty-state"><div className="icon">👥</div><h3>No employees found</h3></div>
+      : viewMode==='grid' ? (
+        <div className="emp-grid">
+          {filtered.map(emp=>{
+            const color = getColor(`${emp.first_name} ${emp.last_name}`);
+            return (
+              <div key={emp.id} className="emp-card" style={{position:'relative',cursor:'pointer'}} onClick={()=>navigate(`/employees/${emp.id}`)}>
+                <StatusDot emp={emp} />
+                <div className="emp-card-top">
+                  <div
+                    className="avatar avatar-lg"
+                    style={emp.profile_image
+                      ? { backgroundImage: `url(${emp.profile_image})`, backgroundSize: 'cover', backgroundPosition: 'center', color: 'transparent' }
+                      : { background: color, color: '#fff' }
+                    }
+                  >
+                    {!emp.profile_image && getInitials(emp.first_name, emp.last_name)}
+                  </div>
+                  <div className="emp-info">
+                    <h3>{emp.first_name} {emp.last_name}</h3>
+                    <p>{emp.designation||'No designation'}</p>
+                    <div className="emp-code">{emp.employee_code}</div>
+                  </div>
+                </div>
+                <div style={{fontSize:12,color:'var(--text-3)',marginBottom:14}}>
+                  <div>🏢 {emp.department||'—'}</div>
+                  <div style={{marginTop:3}}>📧 {emp.email}</div>
+                </div>
+                <div className="emp-card-footer">
+                  <span className={`badge ${emp.status==='active'?'badge-success':'badge-default'}`}>{emp.status}</span>
+                  {can('admin','hr_officer') && (
+                    <button className="btn btn-sm btn-outline" onClick={e=>{e.stopPropagation();setModal(emp);}}>Edit</button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="card">
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead><tr><th>Employee</th><th>Department</th><th>Email</th><th>Login ID</th><th>Status</th><th></th></tr></thead>
+              <tbody>
+                {filtered.map(emp=>{
+                  const color=getColor(`${emp.first_name} ${emp.last_name}`);
+                  return(
+                    <tr key={emp.id}>
+                      <td>
+                        <div style={{display:'flex',alignItems:'center',gap:10}}>
+                          <div style={{position:'relative'}}>
+                            <div
+                              className="avatar avatar-sm"
+                              style={emp.profile_image
+                                ? { backgroundImage: `url(${emp.profile_image})`, backgroundSize: 'cover', backgroundPosition: 'center', color: 'transparent' }
+                                : { background: color, color: '#fff' }
+                              }
+                            >
+                              {!emp.profile_image && getInitials(emp.first_name, emp.last_name)}
+                            </div>
+                            <span style={{position:'absolute',bottom:-2,right:-2,width:9,height:9,borderRadius:'50%',background:emp.on_leave_today?'#3b82f6':emp.today_attendance==='present'?'#22c55e':'#eab308',border:'1.5px solid #fff'}}/>
+                          </div>
+                          <div><div style={{fontWeight:600}}>{emp.first_name} {emp.last_name}</div><div style={{fontSize:11,color:'var(--text-4)'}}>{emp.employee_code}</div></div>
+                        </div>
+                      </td>
+                      <td>{emp.department||'—'}</td>
+                      <td style={{color:'var(--text-3)'}}>{emp.email}</td>
+                      <td><code style={{fontSize:11,background:'var(--surface-2)',padding:'2px 6px',borderRadius:4}}>{emp.login_id||emp.employee_code}</code></td>
+                      <td><span className={`badge ${emp.status==='active'?'badge-success':'badge-default'}`}>{emp.status}</span></td>
+                      <td>
+                        <div style={{display:'flex',gap:6}}>
+                          <button className="btn btn-sm btn-secondary" onClick={()=>navigate(`/employees/${emp.id}`)}>View</button>
+                          {can('admin','hr_officer') && <button className="btn btn-sm btn-outline" onClick={e=>{e.stopPropagation();setModal(emp);}}>Edit</button>}
+                          {can('admin') && <button className="btn btn-sm btn-danger" onClick={()=>handleDelete(emp.id)}>Del</button>}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {modal && <EmployeeModal employee={modal==='new'?null:modal} onClose={()=>setModal(null)} onSave={()=>{setModal(null);load();}} />}
+    </div>
+  );
+}
+
+
+
+
+empay-frontend\src\pages\MyProfilePage.jsx
+
+
+import { useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
+
+export default function MyProfilePage() {
+  const { user } = useAuth();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (user?.employee_id) {
+      navigate(`/employees/${user.employee_id}`, { replace: true });
+    }
+  }, [user, navigate]);
+
+  return (
+    <div className="page-loader" style={{ height: 300, background: 'transparent' }}>
+      <div className="spinner" />
+    </div>
+  );
+}
+
+
+
+
+empay-frontend\src\pages\TimeOffPage.jsx
+
+
+import { useState, useEffect } from 'react';
+import { useAuth } from '../context/AuthContext';
+import api from '../utils/api';
+import toast from 'react-hot-toast';
+
+const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) : '—';
+const STATUS_BADGE = { pending: 'badge-warning', approved: 'badge-success', rejected: 'badge-danger' };
+const LEAVE_TYPES = ['sick','casual','earned','maternity','paternity','unpaid'];
+
+function ApplyModal({ onClose, onSave }) {
+  const [form, setForm] = useState({ leave_type: 'casual', start_date: '', end_date: '', reason: '' });
+  const [docFile, setDocFile] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const isSick = form.leave_type === 'sick';
+
+  const save = async (e) => {
+    e.preventDefault();
+    if (isSick && !docFile) { toast.error('Please upload a supporting document for sick leave'); return; }
+    setLoading(true);
+    try {
+      const fd = new FormData();
+      fd.append('leave_type', form.leave_type);
+      fd.append('start_date', form.start_date);
+      fd.append('end_date', form.end_date);
+      fd.append('reason', form.reason);
+      if (docFile) fd.append('document', docFile);
+      
+      await api.post('/timeoff/apply', fd);
+      toast.success('Leave request submitted!'); 
+      onSave();
+    } catch (err) { toast.error(err.message); }
+    finally { setLoading(false); }
+  };
+
+  return (
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal">
+        <div className="modal-header"><span className="modal-title">Apply for Time Off</span><button className="modal-close" onClick={onClose}>✕</button></div>
+        <form onSubmit={save}>
+          <div className="modal-body">
+            <div className="form-group">
+              <label className="form-label">Leave Type</label>
+              <select className="form-control" value={form.leave_type} onChange={e => setForm(p=>({...p,leave_type:e.target.value}))}>
+                {LEAVE_TYPES.map(t => <option key={t} value={t} style={{textTransform:'capitalize'}}>{t.charAt(0).toUpperCase()+t.slice(1)}</option>)}
+              </select>
+            </div>
+            <div className="form-row">
+              <div className="form-group"><label className="form-label">Start Date</label><input className="form-control" type="date" value={form.start_date} onChange={e=>setForm(p=>({...p,start_date:e.target.value}))} required /></div>
+              <div className="form-group"><label className="form-label">End Date</label><input className="form-control" type="date" value={form.end_date} min={form.start_date} onChange={e=>setForm(p=>({...p,end_date:e.target.value}))} required /></div>
+            </div>
+            <div className="form-group"><label className="form-label">Reason</label><textarea className="form-control" value={form.reason} onChange={e=>setForm(p=>({...p,reason:e.target.value}))} placeholder="Briefly describe the reason..." required /></div>
+
+            {/* Document upload */}
+            <div className="form-group">
+              <label className="form-label">
+                Supporting Document
+                {isSick
+                  ? <span style={{color:'var(--danger)',marginLeft:4}}>* (Required for Sick Leave)</span>
+                  : <span style={{color:'var(--text-3)',marginLeft:4,fontSize:11}}>(Optional)</span>
+                }
+              </label>
+              <div style={{
+                border: `2px dashed ${isSick && !docFile ? 'var(--danger)' : 'var(--border)'}`,
+                borderRadius: 'var(--radius)', padding: '14px 16px',
+                background: 'var(--surface)', transition: 'border-color 0.2s',
+              }}>
+                <input
+                  type="file"
+                  id="timeoff-doc"
+                  accept=".jpg,.jpeg,.png,.gif,.pdf,.doc,.docx"
+                  style={{ display: 'none' }}
+                  onChange={e => setDocFile(e.target.files[0] || null)}
+                />
+                <label htmlFor="timeoff-doc" style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span style={{ fontSize: 24 }}>📎</span>
+                  <div>
+                    {docFile
+                      ? <><div style={{ fontWeight: 600, fontSize: 13, color: 'var(--primary)' }}>✓ {docFile.name}</div><div style={{ fontSize: 11, color: 'var(--text-3)' }}>{(docFile.size/1024).toFixed(1)} KB — click to change</div></>
+                      : <><div style={{ fontWeight: 500, fontSize: 13 }}>Click to upload file</div><div style={{ fontSize: 11, color: 'var(--text-3)' }}>JPG, PNG, PDF, DOC — max 5 MB</div></>
+                    }
+                  </div>
+                </label>
+              </div>
+            </div>
+          </div>
+          <div className="modal-footer">
+            <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
+            <button type="submit" className="btn btn-primary" disabled={loading}>{loading?'Submitting...':'Submit Request'}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function AllocateModal({ employees, onClose, onSave }) {
+  const [form, setForm] = useState({ employee_id: '', leave_type: 'casual', total_allocated: 10, year: new Date().getFullYear() });
+  const [loading, setLoading] = useState(false);
+  const save = async (e) => {
+    e.preventDefault(); setLoading(true);
+    try { await api.post('/timeoff/allocate', form); toast.success('Leave allocated!'); onSave(); }
+    catch (err) { toast.error(err.message); }
+    finally { setLoading(false); }
+  };
+  return (
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal">
+        <div className="modal-header"><span className="modal-title">Allocate Leave</span><button className="modal-close" onClick={onClose}>✕</button></div>
+        <form onSubmit={save}>
+          <div className="modal-body">
+            <div className="form-group">
+              <label className="form-label">Employee</label>
+              <select className="form-control" value={form.employee_id} onChange={e=>setForm(p=>({...p,employee_id:e.target.value}))} required>
+                <option value="">Select employee...</option>
+                {employees.map(e=><option key={e.id} value={e.id}>{e.first_name} {e.last_name} ({e.employee_code})</option>)}
+              </select>
+            </div>
+            <div className="form-row">
+              <div className="form-group">
+                <label className="form-label">Leave Type</label>
+                <select className="form-control" value={form.leave_type} onChange={e=>setForm(p=>({...p,leave_type:e.target.value}))}>
+                  {LEAVE_TYPES.map(t=><option key={t} value={t}>{t.charAt(0).toUpperCase()+t.slice(1)}</option>)}
+                </select>
+              </div>
+              <div className="form-group"><label className="form-label">Days Allocated</label><input className="form-control" type="number" min="1" max="60" value={form.total_allocated} onChange={e=>setForm(p=>({...p,total_allocated:e.target.value}))} /></div>
+            </div>
+            <div className="form-group"><label className="form-label">Year</label><input className="form-control" type="number" value={form.year} onChange={e=>setForm(p=>({...p,year:e.target.value}))} /></div>
+          </div>
+          <div className="modal-footer">
+            <button type="button" className="btn btn-secondary" onClick={onClose}>Cancel</button>
+            <button type="submit" className="btn btn-primary" disabled={loading}>{loading?'Allocating...':'Allocate Leave'}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+export default function TimeOffPage() {
+  const { can, user } = useAuth();
+  const isEmployee = user?.role === 'employee';
+  const [requests, setRequests] = useState([]);
+  const [employees, setEmployees] = useState([]);
+  const [balances, setBalances] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showApply, setShowApply] = useState(false);
+  const [showAllocate, setShowAllocate] = useState(false);
+  const [filter, setFilter] = useState('');
+  const [search, setSearch] = useState('');
+  const [rejectId, setRejectId] = useState(null);
+  const [rejectReason, setRejectReason] = useState('');
+
+  const load = () => {
+    setLoading(true);
+    const ep = isEmployee ? '/timeoff/my' : '/timeoff';
+    api.get(ep).then(r => setRequests(Array.isArray(r) ? r : r?.data ?? [])).catch(() => {}).finally(() => setLoading(false));
+    if (isEmployee && user.employee_id) api.get('/timeoff/balances').then(r => setBalances(Array.isArray(r) ? r : r?.data ?? [])).catch(() => {});
+    if (!isEmployee) api.get('/employees').then(r => setEmployees(Array.isArray(r) ? r : r?.data ?? [])).catch(() => {});
+  };
+  useEffect(() => { load(); }, []);
+
+  const approve = async (id) => {
+    try { await api.put(`/timeoff/${id}/approve`, {}); toast.success('Approved'); load(); }
+    catch (err) { toast.error(err.message); }
+  };
+  const reject = async (id) => {
+    try { await api.put(`/timeoff/${id}/reject`, { rejection_reason: rejectReason }); toast.success('Rejected'); setRejectId(null); setRejectReason(''); load(); }
+    catch (err) { toast.error(err.message); }
+  };
+
+  const statusFiltered = filter ? requests.filter(r => r.status === filter) : requests;
+  const searchLower = search.toLowerCase().trim();
+  const filtered = (!isEmployee && searchLower)
+    ? statusFiltered.filter(r =>
+        `${r.first_name || ''} ${r.last_name || ''}`.toLowerCase().includes(searchLower) ||
+        (r.employee_code || '').toLowerCase().includes(searchLower) ||
+        (r.department || '').toLowerCase().includes(searchLower) ||
+        (r.leave_type || '').toLowerCase().includes(searchLower)
+      )
+    : statusFiltered;
+
+  return (
+    <div>
+      <div className="page-header">
+        <div className="page-header-row">
+          <div><h1>Time Off</h1><p>{isEmployee ? 'Apply and track your leave requests' : 'Manage employee time off requests'}</p></div>
+          <div style={{ display: 'flex', gap: 10 }}>
+            {isEmployee && <button className="btn btn-primary" onClick={() => setShowApply(true)}>+ Apply for Leave</button>}
+            {can('admin','hr_officer') && <button className="btn btn-outline" onClick={() => setShowAllocate(true)}>📋 Allocate Leave</button>}
+          </div>
+        </div>
+      </div>
+
+      {/* Balance cards for employee */}
+      {isEmployee && balances.length > 0 && (
+        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 20 }}>
+          {balances.map(b => (
+            <div key={b.id} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '14px 20px', minWidth: 130, boxShadow: 'var(--shadow-sm)' }}>
+              <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--primary)' }}>{b.total_allocated - b.used}</div>
+              <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-3)', textTransform: 'capitalize', marginTop: 2 }}>{b.leave_type} Remaining</div>
+              <div style={{ fontSize: 11, color: 'var(--text-4)', marginTop: 2 }}>Used: {b.used}/{b.total_allocated}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Filters */}
+      <div className="filter-bar" style={{ flexWrap: 'wrap', gap: 8 }}>
+        <div className="tabs">
+          {['','pending','approved','rejected'].map(s => (
+            <button key={s} className={`tab${filter===s?' active':''}`} onClick={() => setFilter(s)}>
+              {s===''?'All':s.charAt(0).toUpperCase()+s.slice(1)}
+            </button>
+          ))}
+        </div>
+
+        {/* Search bar — admin/HR only */}
+        {!isEmployee && (
+          <div style={{ position: 'relative', marginLeft: 'auto' }}>
+            <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 14, color: 'var(--text-3)', pointerEvents: 'none' }}>🔍</span>
+            <input
+              type="text"
+              className="form-control"
+              style={{ paddingLeft: 32, width: 240 }}
+              placeholder="Search name, code, dept, type..."
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+            />
+            {search && (
+              <button
+                onClick={() => setSearch('')}
+                style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', fontSize: 14 }}
+              >✕</button>
+            )}
+          </div>
+        )}
+
+        <span style={{ fontSize: 12, color: 'var(--text-3)', ...(isEmployee ? { marginLeft: 'auto' } : {}) }}>
+          {filtered.length} request{filtered.length !== 1 ? 's' : ''}
+          {search && ` for "${search}"`}
+        </span>
+      </div>
+
+      {/* Requests table */}
+      <div className="card">
+        {loading ? <div style={{ padding: 40, textAlign: 'center' }}><div className="spinner" style={{ margin: '0 auto' }} /></div> : (
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  {!isEmployee && <th>Employee</th>}
+                  <th>Type</th><th>From</th><th>To</th><th>Days</th><th>Reason</th><th>Status</th><th>Document</th>
+                  {can('admin','payroll_officer') && <th>Actions</th>}
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.length === 0 ? (
+                  <tr><td colSpan={8} style={{ textAlign:'center', padding:40, color:'var(--text-3)' }}>No requests found{search ? ` for "${search}"` : ''}</td></tr>
+                ) : filtered.map(r => (
+                  <tr key={r.id}>
+                    {!isEmployee && <td><div style={{ fontWeight:600 }}>{r.first_name} {r.last_name}</div><div style={{ fontSize:11,color:'var(--text-4)' }}>{r.employee_code}</div></td>}
+                    <td><span style={{ textTransform:'capitalize', fontWeight:500 }}>{r.leave_type}</span></td>
+                    <td>{fmtDate(r.start_date)}</td>
+                    <td>{fmtDate(r.end_date)}</td>
+                    <td style={{ fontWeight:600 }}>{r.total_days}</td>
+                    <td style={{ maxWidth:180, color:'var(--text-3)', fontSize:12 }}>{r.reason}</td>
+                    <td><span className={`badge ${STATUS_BADGE[r.status]||'badge-default'}`}>{r.status}</span></td>
+                    <td>
+                      {r.document_path
+                        ? <a href={`http://localhost:5001/uploads/timeoff/${r.document_path}`} target="_blank" rel="noopener noreferrer"
+                            style={{ display:'inline-flex', alignItems:'center', gap:4, fontSize:12, color:'var(--primary)', fontWeight:600, textDecoration:'none',
+                                     padding:'4px 10px', border:'1px solid var(--primary-light)', borderRadius:99, background:'var(--primary-xlight)' }}>
+                            📎 View Doc
+                          </a>
+                        : <span style={{ fontSize:11, color:'var(--text-4)' }}>—</span>
+                      }
+                    </td>
+                    {can('admin','payroll_officer') && (
+                      <td>
+                        {r.status === 'pending' && (
+                          <div style={{ display:'flex', gap:6 }}>
+                            <button className="btn btn-sm btn-success" onClick={() => approve(r.id)}>✓ Approve</button>
+                            <button className="btn btn-sm btn-danger" onClick={() => setRejectId(r.id)}>✕ Reject</button>
+                          </div>
+                        )}
+                        {r.status !== 'pending' && <span style={{ fontSize:11, color:'var(--text-4)' }}>Reviewed</span>}
+                      </td>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Reject modal */}
+      {rejectId && (
+        <div className="modal-overlay" onClick={e=>e.target===e.currentTarget&&setRejectId(null)}>
+          <div className="modal">
+            <div className="modal-header"><span className="modal-title">Reject Leave Request</span><button className="modal-close" onClick={()=>setRejectId(null)}>✕</button></div>
+            <div className="modal-body">
+              <div className="form-group"><label className="form-label">Rejection Reason</label><textarea className="form-control" value={rejectReason} onChange={e=>setRejectReason(e.target.value)} placeholder="Provide a reason (optional)..." /></div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={()=>setRejectId(null)}>Cancel</button>
+              <button className="btn btn-danger" onClick={()=>reject(rejectId)}>Reject Request</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showApply && <ApplyModal onClose={() => setShowApply(false)} onSave={() => { setShowApply(false); load(); }} />}
+      {showAllocate && <AllocateModal employees={employees} onClose={() => setShowAllocate(false)} onSave={() => { setShowAllocate(false); load(); }} />}
+    </div>
+  );
+}
+
+
+
+
+
+empay-frontend\src\utils\api.js
+
+
+
+const API_BASE = '/api';
+
+const getHeaders = () => ({
+  'Content-Type': 'application/json',
+  Authorization: `Bearer ${localStorage.getItem('empay_token') || ''}`,
+});
+
+const request = async (method, endpoint, data = null, headers = {}) => {
+  const isForm = data instanceof FormData;
+  const opts = { 
+    method, 
+    headers: {
+      ...getHeaders(),
+      ...headers 
+    }
+  };
+  
+  // If it's FormData, let the browser set the Content-Type (with boundary)
+  if (isForm) {
+    Object.keys(opts.headers).forEach(k => {
+      if (k.toLowerCase() === 'content-type') delete opts.headers[k];
+    });
+  } else if (data) {
+    const hasContentType = Object.keys(opts.headers).some(k => k.toLowerCase() === 'content-type');
+    if (!hasContentType) opts.headers['Content-Type'] = 'application/json';
+  }
+
+  if (data) opts.body = isForm ? data : JSON.stringify(data);
+  const res = await fetch(`${API_BASE}${endpoint}`, opts);
+  const json = await res.json();
+  if (!res.ok) throw new Error(json.message || 'Request failed');
+  // Auto-unwrap {success, data} envelope — return .data if exists, else raw json
+  return json && json.data !== undefined ? json.data : json;
+};
+
+export const api = {
+  get: (ep, h) => request('GET', ep, null, h),
+  post: (ep, d, h) => request('POST', ep, d, h),
+  put: (ep, d, h) => request('PUT', ep, d, h),
+  delete: (ep, h) => request('DELETE', ep, null, h),
+};
+
+export default api;
+
+
+
+empay-frontend\src\App.jsx
+
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { Toaster } from 'react-hot-toast';
+import { AuthProvider, useAuth } from './context/AuthContext';
+import Layout from './components/Layout';
+import LoginPage from './pages/LoginPage';
+import DashboardPage from './pages/DashboardPage';
+import EmployeesPage from './pages/EmployeesPage';
+import EmployeeProfilePage from './pages/EmployeeProfilePage';
+import AttendancePage from './pages/AttendancePage';
+import TimeOffPage from './pages/TimeOffPage';
+import PayrollPage from './pages/PayrollPage';
+import ReportsPage from './pages/ReportsPage';
+import SettingsPage from './pages/SettingsPage';
+import MyProfilePage from './pages/MyProfilePage';
+
+const ProtectedRoute = ({ children, roles }) => {
+  const { user, loading } = useAuth();
+  if (loading) return <div className="page-loader"><div className="spinner" /></div>;
+  if (!user) return <Navigate to="/login" replace />;
+  if (roles && !roles.includes(user.role)) return <Navigate to="/dashboard" replace />;
+  return children;
+};
+
+const AppRoutes = () => {
+  const auth = useAuth();
+  const user = auth?.user;
+  return (
+    <Routes>
+      <Route path="/login" element={user ? <Navigate to="/dashboard" /> : <LoginPage />} />
+      <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
+        <Route index element={<Navigate to="/dashboard" />} />
+        <Route path="dashboard" element={<DashboardPage />} />
+        <Route path="employees" element={<EmployeesPage />} />
+        <Route path="employees/:id" element={<EmployeeProfilePage />} />
+        <Route path="attendance" element={<AttendancePage />} />
+        <Route path="time-off" element={<TimeOffPage />} />
+        <Route path="payroll" element={<ProtectedRoute roles={['admin','payroll_officer']}><PayrollPage /></ProtectedRoute>} />
+        <Route path="reports" element={<ProtectedRoute roles={['admin','payroll_officer']}><ReportsPage /></ProtectedRoute>} />
+        <Route path="settings" element={<ProtectedRoute roles={['admin']}><SettingsPage /></ProtectedRoute>} />
+        <Route path="profile" element={<MyProfilePage />} />
+      </Route>
+      <Route path="*" element={<Navigate to="/dashboard" />} />
+    </Routes>
+  );
+};
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <BrowserRouter>
+        <AppRoutes />
+        <Toaster position="top-right" toastOptions={{ duration: 3000, style: { background: '#fff', color: '#0f172a', border: '1px solid #e2e8f0', boxShadow: '0 4px 24px rgba(0,0,0,0.08)', fontSize: '14px' } }} />
+      </BrowserRouter>
+    </AuthProvider>
+  );
+}
+
+
+
+
+empay-frontend\vite.config.js
+
+
+
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+
+export default defineConfig({
+  plugins: [react()],
+  server: {
+    port: 5173,
+    proxy: {
+      '/api': {
+        target: 'http://localhost:5001',
+        changeOrigin: true,
+      },
+      '/uploads': {
+        target: 'http://localhost:5001',
+        changeOrigin: true,
+      }
+    }
+  }
+})
+
+
+
+
+
+
+
+
+

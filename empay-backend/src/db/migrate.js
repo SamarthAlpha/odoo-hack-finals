@@ -29,6 +29,20 @@ async function migrate() {
     ['break_time_hrs',        'DECIMAL(4,2) DEFAULT 1.0'],
     ['pf_rate',               'DECIMAL(5,2) DEFAULT 12.00'],
     ['prof_tax_amount',       'DECIMAL(10,2) DEFAULT 200.00'],
+    ['basic_pct',             'DECIMAL(5,2) DEFAULT 50.00'],
+    ['hra_pct',               'DECIMAL(5,2) DEFAULT 50.00'],
+    ['standard_allowance_fixed', 'DECIMAL(10,2) DEFAULT 967.00'],
+    ['perf_pct',              'DECIMAL(5,2) DEFAULT 8.33'],
+    ['lta_pct',               'DECIMAL(5,2) DEFAULT 8.33'],
+    ['standard_allowance_pct', 'DECIMAL(5,2) DEFAULT 0.00'],
+    ['employee_pf_pct',       'DECIMAL(5,2) DEFAULT 12.00'],
+    ['employer_pf_pct',       'DECIMAL(5,2) DEFAULT 12.00'],
+    ['annual_salary',         'DECIMAL(15,2) DEFAULT 0.00'],
+    ['employee_pf',           'DECIMAL(12,2) DEFAULT 0.00'],
+    ['employer_pf',           'DECIMAL(12,2) DEFAULT 0.00'],
+    ['gross_salary',          'DECIMAL(12,2) DEFAULT 0.00'],
+    ['total_deductions',       'DECIMAL(12,2) DEFAULT 0.00'],
+    ['net_salary',            'DECIMAL(12,2) DEFAULT 0.00'],
     ['birth_date',            'DATE'],
     ['gender',                'VARCHAR(20)'],
     ['marital_status',        'VARCHAR(30)'],
@@ -41,8 +55,11 @@ async function migrate() {
     ['ifsc_code',             'VARCHAR(20)'],
     ['uam_id',                'VARCHAR(50)'],
     ['about',                 'TEXT'],
+    ['work_passion',          'TEXT'],
+    ['hobbies',               'TEXT'],
     ['skills',                'TEXT'],
     ['certifications',        'TEXT'],
+    ['profile_image',         'VARCHAR(255)'],
   ];
   for (const [col, def] of empCols) {
     await addColumnIfMissing(conn, 'employees', col, def);
@@ -51,13 +68,20 @@ async function migrate() {
   // users new columns
   await addColumnIfMissing(conn, 'users', 'login_id', 'VARCHAR(50)');
 
+  // time_off_requests new columns
+  await addColumnIfMissing(conn, 'time_off_requests', 'document_path', 'VARCHAR(255)');
+
+
   // Backfill wage from basic_salary
   await conn.query(`UPDATE employees SET wage = basic_salary WHERE wage = 0 AND basic_salary > 0`);
   // Backfill login_id = employee_code on users
   await conn.query(`UPDATE users u JOIN employees e ON e.user_id = u.id SET u.login_id = e.employee_code WHERE u.login_id IS NULL`);
+  // Backfill standard_allowance_fixed from existing standard_allowance where it's not set
+  await conn.query(`UPDATE employees SET standard_allowance_fixed = 967.00 WHERE standard_allowance_fixed IS NULL OR standard_allowance_fixed = 0`);
 
   console.log('✅ Migration complete!');
   await conn.end();
 }
 
 migrate().catch(err => { console.error('❌ Migration failed:', err.message); process.exit(1); });
+

@@ -1,3 +1,5 @@
+
+
 import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import api from '../utils/api';
@@ -24,16 +26,10 @@ function ApplyModal({ onClose, onSave }) {
       fd.append('end_date', form.end_date);
       fd.append('reason', form.reason);
       if (docFile) fd.append('document', docFile);
-
-      const token = localStorage.getItem('empay_token') || '';
-      const res = await fetch('/api/timeoff/apply', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-        body: fd,
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.message || 'Failed');
-      toast.success('Leave request submitted!'); onSave();
+      
+      await api.post('/timeoff/apply', fd);
+      toast.success('Leave request submitted!'); 
+      onSave();
     } catch (err) { toast.error(err.message); }
     finally { setLoading(false); }
   };
@@ -321,3 +317,7 @@ export default function TimeOffPage() {
     </div>
   );
 }
+
+
+
+

@@ -49,7 +49,8 @@ const getMe = async (req, res) => {
     const [rows] = await db.execute(
       `SELECT u.id, u.email, u.role, u.login_id, e.id as employee_id, e.first_name, e.last_name,
               e.employee_code, e.department, e.designation, e.phone, e.address, e.wage,
-              e.pan_number, e.uan_number, e.bank_account, e.basic_salary, e.date_of_joining, e.status
+              e.pan_number, e.uan_number, e.bank_account, e.basic_salary, e.date_of_joining, e.status,
+              e.profile_image
        FROM users u LEFT JOIN employees e ON e.user_id = u.id
        WHERE u.id = ?`,
       [req.user.id]
@@ -79,3 +80,8 @@ const changePassword = async (req, res) => {
 };
 
 module.exports = { login, getMe, changePassword };
+
+
+
+
+

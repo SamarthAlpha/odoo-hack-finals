@@ -1,3 +1,4 @@
+
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { AuthProvider, useAuth } from './context/AuthContext';
@@ -22,7 +23,8 @@ const ProtectedRoute = ({ children, roles }) => {
 };
 
 const AppRoutes = () => {
-  const { user } = useAuth();
+  const auth = useAuth();
+  const user = auth?.user;
   return (
     <Routes>
       <Route path="/login" element={user ? <Navigate to="/dashboard" /> : <LoginPage />} />
@@ -53,3 +55,6 @@ export default function App() {
     </AuthProvider>
   );
 }
+
+
+

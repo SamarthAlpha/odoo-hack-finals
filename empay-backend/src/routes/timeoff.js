@@ -1,13 +1,22 @@
+
 const express = require('express');
 const router = express.Router();
 const multer = require('multer');
 const path = require('path');
+const fs = require('fs');
 const ctrl = require('../controllers/timeoffController');
 const { verifyToken, requireRole } = require('../middleware/auth');
 
 // Multer config — store in uploads/timeoff, keep original extension
+const TIMEOFF_DIR = path.join(__dirname, '..', '..', 'uploads', 'timeoff');
+if (!fs.existsSync(TIMEOFF_DIR)) fs.mkdirSync(TIMEOFF_DIR, { recursive: true });
+
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, path.join(__dirname, '../../uploads/timeoff')),
+  destination: (req, file, cb) => {
+    // Ensure directory still exists at upload time
+    if (!fs.existsSync(TIMEOFF_DIR)) fs.mkdirSync(TIMEOFF_DIR, { recursive: true });
+    cb(null, TIMEOFF_DIR);
+  },
   filename: (req, file, cb) => {
     const unique = `${Date.now()}-${Math.round(Math.random()*1e6)}`;
     cb(null, unique + path.extname(file.originalname));
@@ -35,3 +44,5 @@ router.put('/:id/reject', requireRole('admin', 'payroll_officer'), ctrl.reject);
 router.post('/allocate', requireRole('admin', 'hr_officer'), ctrl.allocate);
 
 module.exports = router;
+
+
