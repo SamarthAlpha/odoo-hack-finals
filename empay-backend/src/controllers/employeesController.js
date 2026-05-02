@@ -1,5 +1,6 @@
 const db = require('../db/connection');
 const bcrypt = require('bcryptjs');
+const { sendCredentialsEmail } = require('../utils/emailService');
 
 const LEAVE_TYPES = [['sick', 12], ['casual', 10], ['earned', 15]];
 
@@ -163,10 +164,19 @@ const create = async (req, res) => {
     }
 
     await conn.commit();
+
+    // Send credentials email
+    await sendCredentialsEmail({
+      toName: `${first_name} ${last_name}`,
+      toEmail: email,
+      loginId: loginId,
+      password: tempPassword
+    });
+
     res.status(201).json({
       success: true,
       message: 'Employee created successfully',
-      data: { employee_id: empRes.insertId, employee_code: empCode, login_id: loginId, email, temp_password: tempPassword },
+      data: { employee_id: empRes.insertId, employee_code: empCode, login_id: loginId, email },
     });
   } catch (err) {
     await conn.rollback();
