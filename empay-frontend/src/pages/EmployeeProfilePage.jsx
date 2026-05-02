@@ -76,6 +76,7 @@ export default function EmployeeProfilePage() {
 
   const f = (k,v) => setForm(p=>({...p,[k]:v}));
   const canEdit = can('admin','hr_officer') || (user?.employee_id == id);
+  const canSeePrivate = can('admin','hr_officer') || (user?.employee_id == id);
   const canSeeSalary = can('admin','payroll_officer','hr_officer');
   const isOwnProfile = user?.employee_id == id;
   const isEmployee = user?.role === 'employee';
@@ -86,7 +87,7 @@ export default function EmployeeProfilePage() {
   // - Employee (other's profile): blocked at backend, but guard here too
   const tabs = [
     { id: 'resume',  label: 'Resume' },
-    ...(!isEmployee || isOwnProfile ? [{ id: 'private', label: 'Private Info' }] : []),
+    ...(canSeePrivate ? [{ id: 'private', label: 'Private Info' }] : []),
     ...(canSeeSalary ? [{ id: 'salary', label: 'Salary Info' }] : []),
     ...(isOwnProfile ? [{ id: 'security', label: 'Security' }] : []),
   ];
@@ -147,10 +148,10 @@ export default function EmployeeProfilePage() {
                   <span>{icon}</span><span>{val}</span>
                 </div>
               ))}
-              <div style={{marginTop:12,paddingTop:12,borderTop:'1px solid var(--border)'}}>
+              {canSeePrivate && <div style={{marginTop:12,paddingTop:12,borderTop:'1px solid var(--border)'}}>
                 <div style={{fontSize:11,fontWeight:700,color:'var(--text-3)',textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:4}}>Login ID</div>
                 <code style={{fontSize:14,fontWeight:700,color:'var(--primary)',background:'var(--primary-xlight)',padding:'4px 10px',borderRadius:6}}>{emp.login_id||emp.employee_code}</code>
-              </div>
+              </div>}
             </div>
           </div>
 
