@@ -15,7 +15,7 @@ export default function AttendancePage() {
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
-  const [filters, setFilters] = useState({ month: new Date().getMonth() + 1, year: new Date().getFullYear(), employee_id: '' });
+  const [filters, setFilters] = useState({ month: new Date().getMonth() + 1, year: new Date().getFullYear(), employee_id: '', date: '' });
   const [employees, setEmployees] = useState([]);
   const [now, setNow] = useState(new Date());
 
@@ -28,9 +28,12 @@ export default function AttendancePage() {
   const loadToday = () => api.get('/attendance/today-status').then(r => setTodayStatus(r));
   const loadLogs = () => {
     setLoading(true);
+    // When a specific date is selected, use it; otherwise use month+year
+    const dateParam = filters.date ? `&date=${filters.date}` : `&month=${filters.month}&year=${filters.year}`;
+    const empParam = (!isEmployee && filters.employee_id) ? `&employee_id=${filters.employee_id}` : '';
     const ep = isEmployee
-      ? `/attendance/my?month=${filters.month}&year=${filters.year}`
-      : `/attendance?month=${filters.month}&year=${filters.year}${filters.employee_id ? `&employee_id=${filters.employee_id}` : ''}`;
+      ? `/attendance/my?${filters.date ? `date=${filters.date}` : `month=${filters.month}&year=${filters.year}`}`
+      : `/attendance?${filters.date ? `date=${filters.date}` : `month=${filters.month}&year=${filters.year}`}${empParam}`;
     api.get(ep).then(r => setLogs(Array.isArray(r) ? r : r || [])).catch(() => {}).finally(() => setLoading(false));
   };
 
@@ -151,13 +154,52 @@ export default function AttendancePage() {
       </div>
 
       {/* Filters */}
-      <div className="filter-bar">
-        <select className="form-control" style={{ width: 140 }} value={filters.month} onChange={e => setFilters(p => ({ ...p, month: e.target.value }))}>
+      <div className="filter-bar" style={{ flexWrap: 'wrap', gap: 8 }}>
+        {/* Month + Year selectors — disabled when specific date is active */}
+        <select
+          className="form-control"
+          style={{ width: 140, opacity: filters.date ? 0.45 : 1 }}
+          value={filters.month}
+          disabled={!!filters.date}
+          onChange={e => setFilters(p => ({ ...p, month: e.target.value }))}
+        >
           {MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
         </select>
-        <select className="form-control" style={{ width: 100 }} value={filters.year} onChange={e => setFilters(p => ({ ...p, year: e.target.value }))}>
+        <select
+          className="form-control"
+          style={{ width: 100, opacity: filters.date ? 0.45 : 1 }}
+          value={filters.year}
+          disabled={!!filters.date}
+          onChange={e => setFilters(p => ({ ...p, year: e.target.value }))}
+        >
           {[2024, 2025, 2026].map(y => <option key={y}>{y}</option>)}
         </select>
+
+        {/* Divider */}
+        <span style={{ color: 'var(--border)', fontSize: 18, fontWeight: 300, userSelect: 'none' }}>|</span>
+
+        {/* Specific date picker */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-3)', whiteSpace: 'nowrap' }}>Specific Date:</label>
+          <input
+            type="date"
+            className="form-control"
+            style={{ width: 160 }}
+            value={filters.date}
+            onChange={e => setFilters(p => ({ ...p, date: e.target.value }))}
+          />
+          {filters.date && (
+            <button
+              className="btn btn-sm btn-ghost"
+              style={{ padding: '4px 10px', fontSize: 12 }}
+              onClick={() => setFilters(p => ({ ...p, date: '' }))}
+              title="Clear date filter"
+            >
+              ✕ Clear
+            </button>
+          )}
+        </div>
+
         {!isEmployee && (
           <select className="form-control" style={{ width: 200 }} value={filters.employee_id} onChange={e => setFilters(p => ({ ...p, employee_id: e.target.value }))}>
             <option value="">All Employees</option>
@@ -168,7 +210,15 @@ export default function AttendancePage() {
 
       {/* Logs table */}
       <div className="card">
-        <div className="card-header"><div className="card-title">Attendance Log — {MONTHS[filters.month - 1]} {filters.year}</div></div>
+        <div className="card-header">
+          <div className="card-title">
+            Attendance Log —{' '}
+            {filters.date
+              ? new Date(filters.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+              : `${MONTHS[filters.month - 1]} ${filters.year}`
+            }
+          </div>
+        </div>
         {loading ? <div style={{ padding: 40, textAlign: 'center' }}><div className="spinner" style={{ margin: '0 auto' }} /></div> : (
           <div className="table-wrap">
             <table className="data-table">

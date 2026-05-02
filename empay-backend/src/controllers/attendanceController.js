@@ -111,11 +111,14 @@ const todayStatus = async (req, res) => {
 const myLogs = async (req, res) => {
   try {
     const empId = req.user.employee_id;
-    const { month, year } = req.query;
+    const { month, year, date } = req.query;
     let query = `SELECT * FROM attendance WHERE employee_id = ?`;
     const params = [empId];
 
-    if (month && year) {
+    if (date) {
+      query += ` AND date = ?`;
+      params.push(date);
+    } else if (month && year) {
       query += ` AND MONTH(date) = ? AND YEAR(date) = ?`;
       params.push(month, year);
     }
