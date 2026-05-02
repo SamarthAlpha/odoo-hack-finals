@@ -165,4 +165,61 @@ const update = async (req, res) => {
   }
 };
 
-module.exports = { generate, getAll, getPayslip, update };
+// Validate entire payrun (month+year) → mark all as 'paid'
+const validatePayrun = async (req, res) => {
+  try {
+    const { month, year } = req.body;
+    if (!month || !year) return res.status(400).json({ success: false, message: 'Month and year required' });
+    await db.execute(
+      `UPDATE payroll SET status='paid' WHERE pay_period_month=? AND pay_period_year=? AND status != 'paid'`,
+      [month, year]
+    );
+    res.json({ success: true, message: `Payrun for ${month}/${year} validated and marked as paid` });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+// Payroll dashboard stats: warnings + monthly employer cost + employee count
+const getDashboardStats = async (req, res) => {
+  try {
+    // Warnings
+    const [[{ no_bank }]] = await db.execute(
+      `SELECT COUNT(*) as no_bank FROM employees WHERE status='active' AND (bank_account IS NULL OR bank_account='')`
+    );
+    const [[{ no_manager }]] = await db.execute(
+      `SELECT COUNT(*) as no_manager FROM employees WHERE status='active' AND (manager_id IS NULL)`
+    );
+
+    // Last 6 months employer cost (gross_earnings = employer cost proxy)
+    const [monthlyCost] = await db.execute(
+      `SELECT pay_period_month as month, pay_period_year as year,
+              SUM(gross_earnings) as employer_cost, COUNT(DISTINCT employee_id) as emp_count
+       FROM payroll
+       WHERE STR_TO_DATE(CONCAT(pay_period_year,'-',pay_period_month,'-01'),'%Y-%m-%d') >= DATE_SUB(CURDATE(), INTERVAL 6 MONTH)
+       GROUP BY pay_period_year, pay_period_month
+       ORDER BY pay_period_year, pay_period_month`
+    );
+
+    // Pay runs summary
+    const [payrunSummary] = await db.execute(
+      `SELECT pay_period_month as month, pay_period_year as year,
+              COUNT(*) as total, SUM(gross_earnings) as gross, SUM(net_pay) as net,
+              SUM(pf_employer) as employer_cost,
+              SUM(CASE WHEN status='paid' THEN 1 ELSE 0 END) as paid_count
+       FROM payroll
+       GROUP BY pay_period_year, pay_period_month
+       ORDER BY pay_period_year DESC, pay_period_month DESC`
+    );
+
+    res.json({
+      success: true,
+      data: { warnings: { no_bank, no_manager }, monthly_cost: monthlyCost, payrun_summary: payrunSummary }
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+module.exports = { generate, getAll, getPayslip, update, validatePayrun, getDashboardStats };
