@@ -148,7 +148,7 @@ const create = async (req, res) => {
     res.status(201).json({
       success: true,
       message: 'Employee created successfully',
-      data: { employee_id: empRes.insertId, employee_code: empCode, login_id: empCode, email, temp_password: tempPassword },
+      data: { employee_id: empRes.insertId, employee_code: empCode, login_id: loginId, email, temp_password: tempPassword },
     });
   } catch (err) {
     await conn.rollback();
