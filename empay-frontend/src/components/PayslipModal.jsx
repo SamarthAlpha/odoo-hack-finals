@@ -29,24 +29,35 @@ export default function PayslipModal({ p, onClose, onRefresh }) {
     const w = window.open('','','width=820,height=960');
     w.document.write(`<html><head><title>Payslip</title><style>
       @import url('https://fonts.googleapis.com/css2?family=Comic+Neue:ital,wght@0,400;0,700;1,400&display=swap');
-      body{font-family:'Comic Neue',cursive,sans-serif;padding:32px;color:#333;font-size:14px}
-      .payslip-container{border:1px solid #93c5fd;border-radius:12px;padding:24px;}
-      .header-logo{font-weight:bold;margin-bottom:12px;font-size:16px;}
-      hr.sep{border:0;border-top:1px solid #93c5fd;margin:12px -24px 20px -24px;}
-      h2.title{color:#06b6d4;margin-top:0;font-size:20px;font-weight:700;}
-      .emp-details{border:1px solid #93c5fd;border-radius:12px;padding:16px;display:flex;justify-content:space-between;color:#6366f1;margin-bottom:20px;}
-      .emp-details table{width:48%;border:none;}
-      .emp-details td{padding:4px 0;}
-      .section-box{border:1px solid #93c5fd;border-radius:12px;overflow:hidden;margin-bottom:20px;}
-      .purple-header{background:#6b4c7a;color:white;padding:10px 20px;display:flex;justify-content:space-between;font-weight:bold;}
-      .purple-header th{color:white;font-weight:bold;padding:10px 20px;text-align:left;}
-      .row{padding:10px 20px;display:flex;justify-content:space-between;color:#6366f1;}
-      .row-sep{border:0;border-top:1px solid #93c5fd;margin:0;}
-      table.breakdown{width:100%;border-collapse:collapse;}
-      table.breakdown td{padding:10px 20px;font-size:13px;}
-      .footer-bar{display:flex;background:#6b4c7a;color:white;align-items:stretch;}
-      .footer-left{flex:1;padding:16px 20px;font-size:18px;font-weight:bold;display:flex;align-items:center;}
-      .footer-right{background:#06b6d4;padding:16px 30px;text-align:center;display:flex;flex-direction:column;justify-content:center;min-width:160px;}
+      body {
+        font-family: 'Comic Neue', cursive, sans-serif;
+        padding: 32px;
+        color: #333;
+        font-size: 14px;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+      }
+      .payslip-container { border: 1px solid #93c5fd; border-radius: 12px; padding: 24px; page-break-inside: avoid; }
+      .header-logo { font-weight: bold; margin-bottom: 12px; font-size: 16px; }
+      hr.sep { border: 0; border-top: 1px solid #93c5fd; margin: 12px -24px 20px -24px; }
+      h2.title { color: #06b6d4; margin-top: 0; font-size: 20px; font-weight: 700; }
+      .emp-details { border: 1px solid #93c5fd; border-radius: 12px; padding: 16px; display: flex; justify-content: space-between; color: #6366f1; margin-bottom: 20px; page-break-inside: avoid; }
+      .emp-details table { width: 48%; border: none; }
+      .emp-details td { padding: 4px 0; }
+      .section-box { border: 1px solid #93c5fd; border-radius: 12px; overflow: hidden; margin-bottom: 20px; page-break-inside: avoid; }
+      .purple-header { background: #6b4c7a !important; color: white !important; padding: 10px 20px; display: flex; justify-content: space-between; font-weight: bold; }
+      .purple-header th { color: white !important; font-weight: bold; padding: 10px 20px; text-align: left; }
+      .row { padding: 10px 20px; display: flex; justify-content: space-between; color: #6366f1; }
+      .row-sep { border: 0; border-top: 1px solid #93c5fd; margin: 0; }
+      table.breakdown { width: 100%; border-collapse: collapse; table-layout: fixed; }
+      table.breakdown td, table.breakdown th { padding: 10px 20px; font-size: 13px; width: 25%; word-wrap: break-word; }
+      .footer-bar { display: flex; background: #6b4c7a !important; color: white !important; align-items: stretch; page-break-inside: avoid; }
+      .footer-left { flex: 1; padding: 16px 20px; font-size: 18px; font-weight: bold; display: flex; align-items: center; }
+      .footer-right { background: #06b6d4 !important; padding: 16px 30px; text-align: center; display: flex; flex-direction: column; justify-content: center; min-width: 160px; }
+      @media print {
+        @page { margin: 10mm; }
+        body { padding: 0; }
+      }
     </style></head><body>`);
     w.document.write(ref.current.innerHTML);
     w.document.write('</body></html>');
