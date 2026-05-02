@@ -113,12 +113,13 @@ const create = async (req, res) => {
     const tempPassword = `Emp@${Math.random().toString(36).slice(-6).toUpperCase()}`;
     const hash = await bcrypt.hash(tempPassword, 10);
 
-    // Generate employee code BEFORE inserting
+    // Generate employee code (EMP001) and login ID (EPJODO20230001) separately
     const empCode = await nextEmpCode(conn);
+    const loginId = await generateLoginId(conn, first_name, last_name, date_of_joining);
 
     const [userRes] = await conn.execute(
       `INSERT INTO users (email, password_hash, role, login_id) VALUES (?, ?, ?, ?)`,
-      [email, hash, role, empCode]
+      [email, hash, role, loginId]
     );
     const userId = userRes.insertId;
 
