@@ -44,9 +44,16 @@ export default function EmployeeProfilePage() {
       const r = await api.get(`/employees/${id}`);
       const data = r.data || r;
       setEmp(data); setForm(data);
-      const lb = await api.get(`/timeoff/balances/${id}`);
-      setLeaveBalances(lb.data||lb);
-    } catch { navigate('/employees'); }
+      // Only load leave balances for own profile or if admin/HR
+      if (can('admin','hr_officer') || user?.employee_id == id) {
+        const lb = await api.get(`/timeoff/balances/${id}`);
+        setLeaveBalances(lb.data || lb);
+      }
+    } catch (err) {
+      // 403 = employee tried to access another's profile
+      toast.error('Access denied');
+      navigate('/employees');
+    }
     finally { setLoading(false); }
   };
   useEffect(() => { load(); }, [id]);
@@ -70,6 +77,19 @@ export default function EmployeeProfilePage() {
   const f = (k,v) => setForm(p=>({...p,[k]:v}));
   const canEdit = can('admin','hr_officer') || (user?.employee_id == id);
   const canSeeSalary = can('admin','payroll_officer','hr_officer');
+  const isOwnProfile = user?.employee_id == id;
+  const isEmployee = user?.role === 'employee';
+
+  // Tab visibility rules:
+  // - Admin/HR: all tabs
+  // - Employee (own profile): Resume + Security only
+  // - Employee (other's profile): blocked at backend, but guard here too
+  const tabs = [
+    { id: 'resume',  label: 'Resume' },
+    ...(!isEmployee || isOwnProfile ? [{ id: 'private', label: 'Private Info' }] : []),
+    ...(canSeeSalary ? [{ id: 'salary', label: 'Salary Info' }] : []),
+    ...(isOwnProfile ? [{ id: 'security', label: 'Security' }] : []),
+  ];
 
   if (loading) return <div className="page-loader" style={{height:300,background:'transparent'}}><div className="spinner"/></div>;
   if (!emp) return null;
@@ -77,21 +97,14 @@ export default function EmployeeProfilePage() {
   const color = getColor(`${emp.first_name} ${emp.last_name}`);
   const wage = parseFloat(emp.wage) || parseFloat(emp.basic_salary) || 0;
   const basic = Math.round(wage*0.50*100)/100;
-  const hra = Math.round(basic*0.40*100)/100;
-  const std = 967;
-  const perf = Math.round(basic*0.0933*100)/100;
-  const lta = Math.round(basic*0.0933*100)/100;
+  const hra   = Math.round(basic*0.40*100)/100;
+  const std   = 967;
+  const perf  = Math.round(basic*0.0933*100)/100;
+  const lta   = Math.round(basic*0.0933*100)/100;
   const fixed = Math.round((wage-basic-hra-std-perf-lta)*100)/100;
   const pfEmp = Math.round(basic*0.12*100)/100;
-  const pfEr = Math.round(basic*0.12*100)/100;
+  const pfEr  = Math.round(basic*0.12*100)/100;
   const profTax = wage > 15000 ? 200 : 0;
-
-  const tabs = [
-    { id:'resume', label:'Resume' },
-    { id:'private', label:'Private Info' },
-    ...(canSeeSalary ? [{ id:'salary', label:'Salary Info' }] : []),
-    { id:'security', label:'Security' },
-  ];
 
   // Field render helper
   const Field = ({label, value}) => (

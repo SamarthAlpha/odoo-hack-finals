@@ -52,12 +52,22 @@ function computeSalaryComponents(wage) {
 // GET all employees (with today status)
 const getAll = async (req, res) => {
   try {
-    const [rows] = await db.execute(
-      `SELECT e.*, u.email, u.role, u.is_active, u.login_id,
+    // Employees only see themselves; admins/HR see all non-admin employees
+    let query = `SELECT e.*, u.email, u.role, u.is_active, u.login_id,
         (SELECT status FROM attendance WHERE employee_id = e.id AND date = CURDATE() LIMIT 1) AS today_attendance,
         (SELECT 1 FROM time_off_requests WHERE employee_id = e.id AND status='approved' AND CURDATE() BETWEEN start_date AND end_date LIMIT 1) AS on_leave_today
-       FROM employees e JOIN users u ON u.id = e.user_id ORDER BY e.employee_code`
-    );
+       FROM employees e JOIN users u ON u.id = e.user_id
+       WHERE u.role != 'admin'`;
+    const params = [];
+
+    if (req.user.role === 'employee') {
+      // Employees can only see their own record in this list
+      query += ` AND e.user_id = ?`;
+      params.push(req.user.id);
+    }
+    query += ` ORDER BY e.employee_code`;
+
+    const [rows] = await db.execute(query, params);
     res.json(rows);
   } catch (err) {
     console.error(err);
@@ -68,6 +78,14 @@ const getAll = async (req, res) => {
 // GET single employee
 const getOne = async (req, res) => {
   try {
+    // Employees can only view their own profile
+    if (req.user.role === 'employee') {
+      const [check] = await db.execute(`SELECT user_id FROM employees WHERE id = ?`, [req.params.id]);
+      if (!check.length || check[0].user_id !== req.user.id) {
+        return res.status(403).json({ success: false, message: 'Access denied: you can only view your own profile' });
+      }
+    }
+
     const [rows] = await db.execute(
       `SELECT e.*, u.email, u.role, u.is_active, u.login_id,
               m.first_name AS manager_first_name, m.last_name AS manager_last_name
