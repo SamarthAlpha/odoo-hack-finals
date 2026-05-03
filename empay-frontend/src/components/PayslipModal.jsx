@@ -22,47 +22,66 @@ const numToWords = (num) => {
 };
 
 export default function PayslipModal({ p, onClose, onRefresh }) {
-  const [showBreakdown, setShowBreakdown] = useState(false);
+  const [showBreakdown, setShowBreakdown] = useState(true);
   const ref = useRef();
 
   const print = () => {
-    const w = window.open('','','width=820,height=960');
+    const w = window.open('','','width=850,height=960');
     w.document.write(`<html><head><title>Payslip</title><style>
-      @import url('https://fonts.googleapis.com/css2?family=Comic+Neue:ital,wght@0,400;0,700;1,400&display=swap');
+      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
       body {
-        font-family: 'Comic Neue', cursive, sans-serif;
-        padding: 32px;
-        color: #333;
-        font-size: 14px;
+        font-family: 'Inter', system-ui, sans-serif;
+        padding: 40px;
+        color: #1e293b;
+        font-size: 13px;
+        line-height: 1.5;
+        background: #fff;
         -webkit-print-color-adjust: exact !important;
         print-color-adjust: exact !important;
       }
-      .payslip-container { border: 1px solid #93c5fd; border-radius: 12px; padding: 24px; page-break-inside: avoid; }
-      .header-logo { font-weight: bold; margin-bottom: 12px; font-size: 16px; }
-      hr.sep { border: 0; border-top: 1px solid #93c5fd; margin: 12px -24px 20px -24px; }
-      h2.title { color: #06b6d4; margin-top: 0; font-size: 20px; font-weight: 700; }
-      .emp-details { border: 1px solid #93c5fd; border-radius: 12px; padding: 16px; display: flex; justify-content: space-between; color: #6366f1; margin-bottom: 20px; page-break-inside: avoid; }
-      .emp-details table { width: 48%; border: none; }
-      .emp-details td { padding: 4px 0; }
-      .section-box { border: 1px solid #93c5fd; border-radius: 12px; overflow: hidden; margin-bottom: 20px; page-break-inside: avoid; }
-      .purple-header { background: #6b4c7a !important; color: white !important; padding: 10px 20px; display: flex; justify-content: space-between; font-weight: bold; }
-      .purple-header th { color: white !important; font-weight: bold; padding: 10px 20px; text-align: left; }
-      .row { padding: 10px 20px; display: flex; justify-content: space-between; color: #6366f1; }
-      .row-sep { border: 0; border-top: 1px solid #93c5fd; margin: 0; }
-      table.breakdown { width: 100%; border-collapse: collapse; table-layout: fixed; }
-      table.breakdown td, table.breakdown th { padding: 10px 20px; font-size: 13px; width: 25%; word-wrap: break-word; }
-      .footer-bar { display: flex; background: #6b4c7a !important; color: white !important; align-items: stretch; page-break-inside: avoid; }
-      .footer-left { flex: 1; padding: 16px 20px; font-size: 18px; font-weight: bold; display: flex; align-items: center; }
-      .footer-right { background: #06b6d4 !important; padding: 16px 30px; text-align: center; display: flex; flex-direction: column; justify-content: center; min-width: 160px; }
+      .payslip-inner { max-width: 800px; margin: 0 auto; }
+      .brand-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 32px; border-bottom: 2px solid #f1f5f9; padding-bottom: 20px; }
+      .brand-info h1 { font-size: 18px; font-weight: 800; color: #0f172a; margin-bottom: 4px; }
+      .brand-info p { font-size: 11px; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em; }
+      .payslip-title { margin-bottom: 24px; }
+      .payslip-title h2 { font-size: 22px; font-weight: 700; color: #1e3a8a; margin: 0; }
+      .payslip-title p { font-size: 13px; color: #64748b; margin-top: 4px; }
+      
+      .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 30px; }
+      .info-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 16px; }
+      .info-table { width: 100%; border-collapse: collapse; }
+      .info-table td { padding: 5px 0; }
+      .info-label { color: #64748b; font-weight: 500; font-size: 11px; text-transform: uppercase; width: 40%; }
+      .info-value { color: #0f172a; font-weight: 600; font-size: 12px; }
+
+      .section { border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; margin-bottom: 24px; }
+      .section-header { background: #f1f5f9; padding: 12px 20px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; }
+      .section-header h3 { font-size: 12px; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: 0.05em; margin: 0; }
+      
+      .table-data { width: 100%; border-collapse: collapse; }
+      .table-data th { background: #f8fafc; padding: 10px 20px; text-align: left; font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; border-bottom: 1px solid #e2e8f0; }
+      .table-data td { padding: 12px 20px; border-bottom: 1px solid #f1f5f9; font-size: 13px; }
+      .table-data tr:last-child td { border-bottom: none; }
+      
+      .amount-col { text-align: right; font-variant-numeric: tabular-nums; }
+      .bold-text { font-weight: 700; color: #0f172a; }
+      
+      .total-row { background: #1e3a8a !important; color: #fff !important; }
+      .total-row td { padding: 20px !important; border: none; }
+      .total-label { font-size: 16px; font-weight: 700; }
+      .total-amount { font-size: 24px; font-weight: 800; text-align: right; }
+      .amount-words { font-size: 11px; font-weight: 400; opacity: 0.9; margin-top: 4px; display: block; }
+
       @media print {
-        @page { margin: 10mm; }
+        @page { margin: 15mm; }
         body { padding: 0; }
       }
     </style></head><body>`);
+    w.document.write('<div class="payslip-inner">');
     w.document.write(ref.current.innerHTML);
-    w.document.write('</body></html>');
+    w.document.write('</div></body></html>');
     w.document.close();
-    setTimeout(() => w.print(), 500); // slight delay for fonts to load
+    setTimeout(() => w.print(), 500);
   };
 
   const doAction = async (status, msg) => {
@@ -79,146 +98,132 @@ export default function PayslipModal({ p, onClose, onRefresh }) {
 
   return (
     <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="modal modal-lg" style={{ maxWidth: 840, maxHeight: '92vh', overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+      <div className="modal modal-lg" style={{ maxWidth: 900, maxHeight: '94vh', overflowY: 'auto', display: 'flex', flexDirection: 'column', background: '#f8fafc' }}>
 
         {/* Action bar */}
-        <div style={{ display: 'flex', gap: 10, padding: '14px 24px', borderBottom: '1px solid var(--border)', flexWrap: 'wrap', alignItems: 'center', background: 'var(--surface)' }}>
-          <button className="btn btn-sm btn-secondary" onClick={() => setShowBreakdown(!showBreakdown)}>
-            {showBreakdown ? 'Hide Breakdown' : 'Compute'}
-          </button>
+        <div style={{ display: 'flex', gap: 12, padding: '16px 28px', borderBottom: '1px solid #e2e8f0', flexWrap: 'wrap', alignItems: 'center', background: '#fff', position: 'sticky', top: 0, zindex: 10 }}>
+          <div style={{ marginRight: 'auto' }}>
+            <h3 style={{ fontSize: 15, fontWeight: 700, color: '#0f172a' }}>Payslip Management</h3>
+          </div>
           {p.status !== 'paid' && (
             <button className="btn btn-sm btn-success" onClick={() => doAction('paid', 'Payslip validated!')}>Validate</button>
           )}
           <button className="btn btn-sm btn-danger" onClick={() => doAction('draft', 'Payslip cancelled')}>Cancel</button>
-          <button className="btn btn-sm btn-outline" onClick={print}>🖨 Print</button>
-          <button className="modal-close" style={{ marginLeft: 'auto' }} onClick={onClose}>✕</button>
+          <button className="btn btn-sm btn-outline" onClick={print}>🖨 Print Payslip</button>
+          <button className="modal-close" onClick={onClose}>✕</button>
         </div>
 
-        <div className="modal-body" style={{ flex: 1, padding: 24, background: '#f8fafc' }}>
+        <div className="modal-body" style={{ padding: '32px 40px', background: '#fff', margin: '20px 28px', borderRadius: 16, boxShadow: '0 4px 20px rgba(0,0,0,0.05)', border: '1px solid #e2e8f0' }}>
           
-          {/* Printable Payslip Container */}
-          <div ref={ref} style={{ fontFamily: "'Comic Neue', cursive, sans-serif", color: '#333' }}>
-            <div className="payslip-container" style={{ border: '1px solid #93c5fd', borderRadius: 12, padding: 24, background: '#fff' }}>
-              
-              <div className="header-logo" style={{ fontWeight: 'bold', marginBottom: 12, fontSize: 16 }}>
-                EmPay HRMS Corporation
+          <div ref={ref}>
+            <div className="brand-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 32, borderBottom: '2px solid #f1f5f9', paddingBottom: 20 }}>
+              <div className="brand-info">
+                <h1 style={{ fontSize: 18, fontweight: 800, color: '#0f172a', margin: '0 0 4px 0' }}>EmPay HRMS Corporation</h1>
+                <p style={{ fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 }}>Excellence in Human Capital Management</p>
               </div>
-              <hr className="sep" style={{ border: 0, borderTop: '1px solid #93c5fd', margin: '12px -24px 20px -24px' }} />
-              
-              <h2 className="title" style={{ color: '#06b6d4', marginTop: 0, fontSize: 20, fontWeight: 700, marginBottom: 20 }}>
-                Salary slip for month of {MF[p.pay_period_month - 1].toLowerCase()} {p.pay_period_year}
-              </h2>
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ background: p.status === 'paid' ? '#d1fae5' : '#fef3c7', color: p.status === 'paid' ? '#065f46' : '#92400e', padding: '4px 12px', borderRadius: 99, fontSize: 11, fontWeight: 700, textTransform: 'uppercase' }}>
+                  {p.status}
+                </div>
+              </div>
+            </div>
+            
+            <div className="payslip-title" style={{ marginBottom: 24 }}>
+              <h2 style={{ fontSize: 24, fontWeight: 800, color: '#1e3a8a', margin: 0 }}>Salary Statement</h2>
+              <p style={{ fontSize: 14, color: '#64748b', marginTop: 4 }}>For the period of {MF[p.pay_period_month - 1]} {p.pay_period_year}</p>
+            </div>
 
-              {/* Employee Details Box */}
-              <div className="emp-details" style={{ border: '1px solid #93c5fd', borderRadius: 12, padding: 16, display: 'flex', justifyContent: 'space-between', color: '#6366f1', marginBottom: 20 }}>
-                <table style={{ width: '48%', border: 'none', fontSize: 13 }}>
+            <div className="info-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, marginBottom: 32 }}>
+              <div className="info-box" style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 12, padding: 20 }}>
+                <table className="info-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <tbody>
-                    <tr><td style={{padding:'4px 0'}}>Employee name</td><td style={{padding:'4px 0'}}>: {p.first_name} {p.last_name}</td></tr>
-                    <tr><td style={{padding:'4px 0'}}>Employee Code</td><td style={{padding:'4px 0'}}>: {p.employee_code}</td></tr>
-                    <tr><td style={{padding:'4px 0'}}>Department</td><td style={{padding:'4px 0'}}>: {p.department || '—'}</td></tr>
-                    <tr><td style={{padding:'4px 0'}}>Location</td><td style={{padding:'4px 0'}}>: {p.location || '—'}</td></tr>
-                    <tr><td style={{padding:'4px 0'}}>Date of joining</td><td style={{padding:'4px 0'}}>: {joinDate}</td></tr>
-                  </tbody>
-                </table>
-                <table style={{ width: '48%', border: 'none', fontSize: 13 }}>
-                  <tbody>
-                    <tr><td style={{padding:'4px 0'}}>PAN</td><td style={{padding:'4px 0'}}>: {p.pan_number || '—'}</td></tr>
-                    <tr><td style={{padding:'4px 0'}}>UAN</td><td style={{padding:'4px 0'}}>: {p.uan_number || '—'}</td></tr>
-                    <tr><td style={{padding:'4px 0'}}>Bank A/c NO.</td><td style={{padding:'4px 0'}}>: {p.bank_account || '—'}</td></tr>
-                    <tr><td style={{padding:'4px 0'}}>Pay period</td><td style={{padding:'4px 0'}}>: 1/{p.pay_period_month}/{p.pay_period_year} to {periodEnd}/{p.pay_period_month}/{p.pay_period_year}</td></tr>
-                    <tr><td style={{padding:'4px 0'}}>Pay date</td><td style={{padding:'4px 0'}}>: {payDate}</td></tr>
+                    <tr><td style={{ color: '#64748b', fontWeight: 500, fontSize: 11, textTransform: 'uppercase', width: '45%', padding: '4px 0' }}>Employee Name</td><td style={{ color: '#0f172a', fontWeight: 700, fontSize: 13, padding: '4px 0' }}>{p.first_name} {p.last_name}</td></tr>
+                    <tr><td style={{ color: '#64748b', fontWeight: 500, fontSize: 11, textTransform: 'uppercase', padding: '4px 0' }}>Employee Code</td><td style={{ color: '#0f172a', fontWeight: 700, fontSize: 13, padding: '4px 0' }}>{p.employee_code}</td></tr>
+                    <tr><td style={{ color: '#64748b', fontWeight: 500, fontSize: 11, textTransform: 'uppercase', padding: '4px 0' }}>Department</td><td style={{ color: '#0f172a', fontWeight: 700, fontSize: 13, padding: '4px 0' }}>{p.department || '—'}</td></tr>
+                    <tr><td style={{ color: '#64748b', fontWeight: 500, fontSize: 11, textTransform: 'uppercase', padding: '4px 0' }}>Location</td><td style={{ color: '#0f172a', fontWeight: 700, fontSize: 13, padding: '4px 0' }}>{p.location || '—'}</td></tr>
+                    <tr><td style={{ color: '#64748b', fontWeight: 500, fontSize: 11, textTransform: 'uppercase', padding: '4px 0' }}>Joining Date</td><td style={{ color: '#0f172a', fontWeight: 700, fontSize: 13, padding: '4px 0' }}>{joinDate}</td></tr>
                   </tbody>
                 </table>
               </div>
+              <div className="info-box" style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 12, padding: 20 }}>
+                <table className="info-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <tbody>
+                    <tr><td style={{ color: '#64748b', fontWeight: 500, fontSize: 11, textTransform: 'uppercase', width: '45%', padding: '4px 0' }}>PAN Number</td><td style={{ color: '#0f172a', fontWeight: 700, fontSize: 13, padding: '4px 0' }}>{p.pan_number || '—'}</td></tr>
+                    <tr><td style={{ color: '#64748b', fontWeight: 500, fontSize: 11, textTransform: 'uppercase', padding: '4px 0' }}>UAN Number</td><td style={{ color: '#0f172a', fontWeight: 700, fontSize: 13, padding: '4px 0' }}>{p.uan_number || '—'}</td></tr>
+                    <tr><td style={{ color: '#64748b', fontWeight: 500, fontSize: 11, textTransform: 'uppercase', padding: '4px 0' }}>Bank Account</td><td style={{ color: '#0f172a', fontWeight: 700, fontSize: 13, padding: '4px 0' }}>{p.bank_account || '—'}</td></tr>
+                    <tr><td style={{ color: '#64748b', fontWeight: 500, fontSize: 11, textTransform: 'uppercase', padding: '4px 0' }}>Pay Period</td><td style={{ color: '#0f172a', fontWeight: 700, fontSize: 13, padding: '4px 0' }}>{MF[p.pay_period_month-1]} {p.pay_period_year}</td></tr>
+                    <tr><td style={{ color: '#64748b', fontWeight: 500, fontSize: 11, textTransform: 'uppercase', padding: '4px 0' }}>Payment Date</td><td style={{ color: '#0f172a', fontWeight: 700, fontSize: 13, padding: '4px 0' }}>{payDate}</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
 
-              {/* Worked Days Box */}
-              <div className="section-box" style={{ border: '1px solid #93c5fd', borderRadius: 12, overflow: 'hidden', marginBottom: 20 }}>
-                <div className="purple-header" style={{ background: '#6b4c7a', color: 'white', padding: '10px 20px', display: 'flex', justifyContent: 'space-between', fontWeight: 'bold' }}>
-                  <span>Worked Days</span>
-                  <span>Number of Days</span>
+            <div className="section" style={{ border: '1px solid #e2e8f0', borderRadius: 12, overflow: 'hidden', marginBottom: 24 }}>
+              <div className="section-header" style={{ background: '#f1f5f9', padding: '12px 20px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between' }}>
+                <h3 style={{ fontSize: 12, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 }}>Attendance Summary</h3>
+                <span style={{ fontSize: 12, fontWeight: 700, color: '#1e3a8a' }}>{attDays} / {wDays} Days Worked</span>
+              </div>
+            </div>
+
+            <div className="section" style={{ border: '1px solid #e2e8f0', borderRadius: 12, overflow: 'hidden', marginBottom: 24 }}>
+              <table className="table-data" style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr>
+                    <th style={{ background: '#f8fafc', padding: '12px 20px', textAlign: 'left', fontSize: 11, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', borderBottom: '1px solid #e2e8f0' }}>Earnings</th>
+                    <th style={{ background: '#f8fafc', padding: '12px 20px', textAlign: 'right', fontSize: 11, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', borderBottom: '1px solid #e2e8f0' }}>Amount</th>
+                    <th style={{ background: '#f8fafc', padding: '12px 20px', textAlign: 'left', fontSize: 11, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', borderBottom: '1px solid #e2e8f0' }}>Deductions</th>
+                    <th style={{ background: '#f8fafc', padding: '12px 20px', textAlign: 'right', fontSize: 11, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', borderBottom: '1px solid #e2e8f0' }}>Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td style={{ padding: '12px 20px', fontSize: 13, color: '#475569' }}>Basic Salary</td>
+                    <td style={{ padding: '12px 20px', fontSize: 13, textAlign: 'right', fontWeight: 600, color: '#0f172a' }}>{fc(p.basic_salary)}</td>
+                    <td style={{ padding: '12px 20px', fontSize: 13, color: '#475569' }}>PF Employee</td>
+                    <td style={{ padding: '12px 20px', fontSize: 13, textAlign: 'right', fontWeight: 600, color: '#dc2626' }}>- {fc(p.pf_employee)}</td>
+                  </tr>
+                  <tr>
+                    <td style={{ padding: '12px 20px', fontSize: 13, color: '#475569' }}>HRA</td>
+                    <td style={{ padding: '12px 20px', fontSize: 13, textAlign: 'right', fontWeight: 600, color: '#0f172a' }}>{fc(p.hra)}</td>
+                    <td style={{ padding: '12px 20px', fontSize: 13, color: '#475569' }}>PF Employer</td>
+                    <td style={{ padding: '12px 20px', fontSize: 13, textAlign: 'right', fontWeight: 600, color: '#dc2626' }}>- {fc(p.pf_employer)}</td>
+                  </tr>
+                  <tr>
+                    <td style={{ padding: '12px 20px', fontSize: 13, color: '#475569' }}>Standard Allowance</td>
+                    <td style={{ padding: '12px 20px', fontSize: 13, textAlign: 'right', fontWeight: 600, color: '#0f172a' }}>{fc(p.standard_allowance)}</td>
+                    <td style={{ padding: '12px 20px', fontSize: 13, color: '#475569' }}>Professional Tax</td>
+                    <td style={{ padding: '12px 20px', fontSize: 13, textAlign: 'right', fontWeight: 600, color: '#dc2626' }}>- {fc(p.professional_tax)}</td>
+                  </tr>
+                  <tr>
+                    <td style={{ padding: '12px 20px', fontSize: 13, color: '#475569' }}>Performance Bonus</td>
+                    <td style={{ padding: '12px 20px', fontSize: 13, textAlign: 'right', fontWeight: 600, color: '#0f172a' }}>{fc(p.performance_bonus)}</td>
+                    <td style={{ padding: '12px 20px', fontSize: 13, color: '#475569' }}>TDS</td>
+                    <td style={{ padding: '12px 20px', fontSize: 13, textAlign: 'right', fontWeight: 600, color: '#dc2626' }}>- {fc(p.tds_deduction || 0)}</td>
+                  </tr>
+                  <tr>
+                    <td style={{ padding: '12px 20px', fontSize: 13, color: '#475569' }}>Other Allowances</td>
+                    <td style={{ padding: '12px 20px', fontSize: 13, textAlign: 'right', fontWeight: 600, color: '#0f172a' }}>{fc(p.fixed_allowance + p.lta)}</td>
+                    <td style={{ padding: '12px 20px', fontSize: 13, color: '#475569' }}></td>
+                    <td style={{ padding: '12px 20px', fontSize: 13, textAlign: 'right', fontWeight: 600 }}></td>
+                  </tr>
+                  <tr style={{ background: '#f8fafc', borderTop: '2px solid #e2e8f0' }}>
+                    <td style={{ padding: '14px 20px', fontSize: 13, fontWeight: 700, color: '#1e3a8a' }}>Gross Earnings</td>
+                    <td style={{ padding: '14px 20px', fontSize: 13, textAlign: 'right', fontWeight: 800, color: '#1e3a8a' }}>{fc(p.gross_earnings)}</td>
+                    <td style={{ padding: '14px 20px', fontSize: 13, fontWeight: 700, color: '#64748b' }}>Total Deductions</td>
+                    <td style={{ padding: '14px 20px', fontSize: 13, textAlign: 'right', fontWeight: 800, color: '#dc2626' }}>- {fc(p.total_deductions)}</td>
+                  </tr>
+                </tbody>
+              </table>
+
+              <div className="total-bar" style={{ background: '#1e3a8a', color: '#fff', padding: '24px 30px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <span style={{ fontSize: 16, fontWeight: 700 }}>Net Payable</span>
+                  <span style={{ display: 'block', fontSize: 11, fontWeight: 400, opacity: 0.8, marginTop: 4 }}>{numToWords(p.net_pay)} only</span>
                 </div>
-                <div className="row" style={{ padding: '10px 20px', display: 'flex', justifyContent: 'space-between', color: '#6366f1', fontSize: 13 }}>
-                  <span>Attendance</span>
-                  <span>{attDays} Days</span>
-                </div>
-                <hr className="row-sep" style={{ border: 0, borderTop: '1px solid #93c5fd', margin: 0 }} />
-                <div className="row" style={{ padding: '10px 20px', display: 'flex', justifyContent: 'space-between', color: '#6366f1', fontSize: 13 }}>
-                  <span>Total</span>
-                  <span>{wDays} Days</span>
+                <div style={{ fontSize: 32, fontWeight: 800, letterSpacing: '-0.02em' }}>
+                  {fc(p.net_pay)}
                 </div>
               </div>
-
-              {/* Earnings & Deductions */}
-              {showBreakdown && (
-                <div className="section-box" style={{ border: '1px solid #93c5fd', borderRadius: 12, overflow: 'hidden', marginBottom: 20 }}>
-                  <table className="breakdown" style={{ width: '100%', borderCollapse: 'collapse' }}>
-                    <thead>
-                      <tr className="purple-header" style={{ background: '#6b4c7a' }}>
-                        <th style={{ color: 'white', fontWeight: 'bold', padding: '10px 20px', textAlign: 'left' }}>Earnings</th>
-                        <th style={{ color: 'white', fontWeight: 'bold', padding: '10px 20px', textAlign: 'left' }}>Amounts</th>
-                        <th style={{ color: 'white', fontWeight: 'bold', padding: '10px 20px', textAlign: 'left' }}>Deductions</th>
-                        <th style={{ color: 'white', fontWeight: 'bold', padding: '10px 20px', textAlign: 'left' }}>Amounts</th>
-                      </tr>
-                    </thead>
-                    <tbody style={{ color: '#333' }}>
-                      <tr>
-                        <td style={{ padding: '10px 20px', fontSize: 13 }}>Basic Salary</td>
-                        <td style={{ padding: '10px 20px', fontSize: 13 }}>{fc(p.basic_salary)}</td>
-                        <td style={{ padding: '10px 20px', fontSize: 13 }}>PF Employee</td>
-                        <td style={{ padding: '10px 20px', fontSize: 13 }}>- {fc(p.pf_employee)}</td>
-                      </tr>
-                      <tr>
-                        <td style={{ padding: '10px 20px', fontSize: 13 }}>House Rent Allowance</td>
-                        <td style={{ padding: '10px 20px', fontSize: 13 }}>{fc(p.hra)}</td>
-                        <td style={{ padding: '10px 20px', fontSize: 13 }}>PF Employer</td>
-                        <td style={{ padding: '10px 20px', fontSize: 13 }}>- {fc(p.pf_employer)}</td>
-                      </tr>
-                      <tr>
-                        <td style={{ padding: '10px 20px', fontSize: 13 }}>Standard Allowance</td>
-                        <td style={{ padding: '10px 20px', fontSize: 13 }}>{fc(p.standard_allowance)}</td>
-                        <td style={{ padding: '10px 20px', fontSize: 13 }}>Professional Tax</td>
-                        <td style={{ padding: '10px 20px', fontSize: 13 }}>- {fc(p.professional_tax)}</td>
-                      </tr>
-                      <tr>
-                        <td style={{ padding: '10px 20px', fontSize: 13 }}>Performance Bonus</td>
-                        <td style={{ padding: '10px 20px', fontSize: 13 }}>{fc(p.performance_bonus)}</td>
-                        <td style={{ padding: '10px 20px', fontSize: 13 }}>TDS Deduction</td>
-                        <td style={{ padding: '10px 20px', fontSize: 13 }}>- {fc(p.tds_deduction || 0)}</td>
-                      </tr>
-                      <tr>
-                        <td style={{ padding: '10px 20px', fontSize: 13 }}>Leave Travel Allowance</td>
-                        <td style={{ padding: '10px 20px', fontSize: 13 }}>{fc(p.lta)}</td>
-                        <td style={{ padding: '10px 20px', fontSize: 13 }}></td>
-                        <td style={{ padding: '10px 20px', fontSize: 13 }}></td>
-                      </tr>
-                      <tr>
-                        <td style={{ padding: '10px 20px', fontSize: 13 }}>Fixed Allowance</td>
-                        <td style={{ padding: '10px 20px', fontSize: 13 }}>{fc(p.fixed_allowance)}</td>
-                        <td style={{ padding: '10px 20px', fontSize: 13 }}></td>
-                        <td style={{ padding: '10px 20px', fontSize: 13 }}></td>
-                      </tr>
-                      <tr>
-                        <td style={{ padding: '10px 20px', fontSize: 13, paddingTop: 20 }}>Gross</td>
-                        <td style={{ padding: '10px 20px', fontSize: 13, paddingTop: 20 }}>{fc(p.gross_earnings)}</td>
-                        <td style={{ padding: '10px 20px', fontSize: 13 }}></td>
-                        <td style={{ padding: '10px 20px', fontSize: 13 }}></td>
-                      </tr>
-                    </tbody>
-                  </table>
-                  
-                  {/* Total Bar */}
-                  <div className="footer-bar" style={{ display: 'flex', background: '#6b4c7a', color: 'white', alignItems: 'stretch' }}>
-                    <div className="footer-left" style={{ flex: 1, padding: '16px 20px', fontSize: 18, fontWeight: 'bold', display: 'flex', alignItems: 'center' }}>
-                      Total Net Payable <span style={{ fontSize: 12, fontWeight: 'normal', marginLeft: 8 }}>(Gross Earning - Total deductions)</span>
-                    </div>
-                    <div className="footer-right" style={{ background: '#06b6d4', padding: '16px 30px', textAlign: 'center', display: 'flex', flexDirection: 'column', justifyContent: 'center', minWidth: 160 }}>
-                      <div style={{ fontSize: 18, fontWeight: 'bold' }}>{fc(p.net_pay).replace('₹', '')}</div>
-                      <div style={{ fontSize: 11, marginTop: 4 }}>[{numToWords(p.net_pay)}] only</div>
-                    </div>
-                  </div>
-                </div>
-              )}
-
             </div>
           </div>
         </div>

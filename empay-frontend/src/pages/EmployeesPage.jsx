@@ -153,14 +153,14 @@ function EmployeeModal({ employee, onClose, onSave }) {
             <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 12 }}>Financial</div>
             <div className="form-row">
               <div className="form-group">
-                <label className="form-label">Monthly Wage (₹) — all components auto-calculated</label>
-                <input className="form-control" type="number" value={form.wage || ''} onChange={e => f('wage', e.target.value)} placeholder="e.g. 50000" />
+                <label className="form-label">Monthly Wage (₹)* — all components auto-calculated</label>
+                <input className="form-control" type="number" value={form.wage || ''} onChange={e => f('wage', e.target.value)} placeholder="e.g. 50000" required />
               </div>
-              <div className="form-group"><label className="form-label">PAN Number</label><input className="form-control" value={form.pan_number || ''} onChange={e => f('pan_number', e.target.value)} /></div>
+              <div className="form-group"><label className="form-label">PAN Number*</label><input className="form-control" value={form.pan_number || ''} onChange={e => f('pan_number', e.target.value)} required /></div>
             </div>
             <div className="form-row">
-              <div className="form-group"><label className="form-label">Bank Account</label><input className="form-control" value={form.bank_account || ''} onChange={e => f('bank_account', e.target.value)} /></div>
-              <div className="form-group"><label className="form-label">Bank Name</label><input className="form-control" value={form.bank_name || ''} onChange={e => f('bank_name', e.target.value)} /></div>
+              <div className="form-group"><label className="form-label">Bank Account*</label><input className="form-control" value={form.bank_account || ''} onChange={e => f('bank_account', e.target.value)} required /></div>
+              <div className="form-group"><label className="form-label">Bank Name*</label><input className="form-control" value={form.bank_name || ''} onChange={e => f('bank_name', e.target.value)} required /></div>
             </div>
           </div>
           <div className="modal-footer">

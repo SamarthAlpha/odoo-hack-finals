@@ -107,7 +107,7 @@ const Field = ({label, value}) => (
 const InputField = ({label, k, form, onChange, type='text', required}) => (
   <div className="form-group">
     <label className="form-label">{label}{required&&'*'}</label>
-    <input className="form-control" type={type} value={form[k]?.toString?.()?.split?.('T')?.[0]||form[k]||''} onChange={e=>onChange(k,e.target.value)} />
+    <input className="form-control" type={type} value={form[k]?.toString?.()?.split?.('T')?.[0]||form[k]||''} onChange={e=>onChange(k,e.target.value)} required={required} />
   </div>
 );
 
@@ -177,7 +177,7 @@ export default function EmployeeProfilePage() {
         prof_tax_amount: parseFloat(data.prof_tax_amount) || 200,
       });
       // Only load leave balances for own profile or if admin/HR
-      if (can('admin','hr_officer') || user?.employee_id == id) {
+      if (can('admin','hr_officer','payroll_officer') || user?.employee_id == id) {
         const lb = await api.get(`/timeoff/balances/${id}`);
         setLeaveBalances(lb.data || lb);
       }
@@ -280,6 +280,7 @@ export default function EmployeeProfilePage() {
   const canSeePrivate = can('admin','hr_officer') || (user?.employee_id == id);
   const canSeeSalary = can('admin','payroll_officer','hr_officer');
   const canEditSalary = can('admin','payroll_officer','hr_officer');
+  const canSeeLeaves = can('admin','hr_officer','payroll_officer') || (user?.employee_id == id);
   const isOwnProfile = user?.employee_id == id;
   const isEmployee = user?.role === 'employee';
 
@@ -290,6 +291,7 @@ export default function EmployeeProfilePage() {
   const tabs = [
     { id: 'resume',  label: 'Resume' },
     ...(canSeePrivate ? [{ id: 'private', label: 'Private Info' }] : []),
+    ...(canSeeLeaves ? [{ id: 'leaves', label: 'Leave Balance' }] : []),
     ...(canSeeSalary ? [{ id: 'salary', label: 'Salary Info' }] : []),
     ...(isOwnProfile ? [{ id: 'security', label: 'Security' }] : []),
   ];
@@ -367,7 +369,10 @@ export default function EmployeeProfilePage() {
       {/* ── TABS ── */}
       <div style={{display:'flex',borderBottom:'2px solid var(--border)',marginBottom:20}}>
         {tabs.map(t=>(
-          <button key={t.id} onClick={()=>setTab(t.id)} style={{padding:'12px 24px',background:'none',border:'none',cursor:'pointer',fontSize:14,fontWeight:600,color:tab===t.id?'var(--primary)':'var(--text-3)',borderBottom:`2px solid ${tab===t.id?'var(--primary)':'transparent'}`,marginBottom:-2,transition:'all 0.2s'}}>
+          <button key={t.id} onClick={()=>{
+            setTab(t.id);
+            if (t.id === 'leaves') load(); // Re-fetch on tab switch to get dynamic balance updates
+          }} style={{padding:'12px 24px',background:'none',border:'none',cursor:'pointer',fontSize:14,fontWeight:600,color:tab===t.id?'var(--primary)':'var(--text-3)',borderBottom:`2px solid ${tab===t.id?'var(--primary)':'transparent'}`,marginBottom:-2,transition:'all 0.2s'}}>
             {t.label}
           </button>
         ))}
@@ -469,12 +474,12 @@ export default function EmployeeProfilePage() {
                 {editing ? (
                   <>
                     <div className="form-row">
-                      <InputField label="Account Number" k="bank_account" form={form} onChange={f} />
-                      <InputField label="Bank Name" k="bank_name" form={form} onChange={f} />
+                      <InputField label="Account Number" k="bank_account" form={form} onChange={f} required />
+                      <InputField label="Bank Name" k="bank_name" form={form} onChange={f} required />
                     </div>
                     <div className="form-row">
                       <InputField label="IFSC Code" k="ifsc_code" form={form} onChange={f} />
-                      <InputField label="PAN Number" k="pan_number" form={form} onChange={f} />
+                      <InputField label="PAN Number" k="pan_number" form={form} onChange={f} required />
                     </div>
                     <div className="form-row">
                       <InputField label="UAN Number" k="uan_number" form={form} onChange={f} />
@@ -524,7 +529,7 @@ export default function EmployeeProfilePage() {
                     <div style={{background:'var(--primary-xlight)',border:'1px solid var(--primary-light)',borderRadius:'var(--radius)',padding:'14px 18px'}}>
                       <div style={{fontSize:11,fontWeight:700,color:'var(--primary)',textTransform:'uppercase',marginBottom:6}}>Month Wage</div>
                       {salaryEditing
-                        ? <input className="form-control" type="number" min="0" value={salaryForm.wage} onChange={e=>sf('wage',e.target.value)} />
+                        ? <input className="form-control" type="number" min="0" value={salaryForm.wage} onChange={e=>sf('wage',e.target.value)} required />
                         : <div style={{fontSize:22,fontWeight:800,color:'var(--primary)'}}>{fmtCurr(v.w)}</div>}
                     </div>
                     <div style={{background:'var(--surface-2)',border:'1px solid var(--border)',borderRadius:'var(--radius)',padding:'14px 18px'}}>
@@ -608,6 +613,53 @@ export default function EmployeeProfilePage() {
                 </>
               );
             })()}
+
+      {/* ── LEAVE BALANCE TAB ── */}
+      {tab==='leaves' && canSeeLeaves && (
+        <div className="card">
+          <div className="card-header">
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',width:'100%'}}>
+              <div className="card-title">Leave Balances — {new Date().getFullYear()}</div>
+              <button 
+                className="btn btn-sm btn-ghost" 
+                onClick={load}
+                style={{fontSize:12,padding:'4px 8px'}}
+              >
+                🔄 Refresh
+              </button>
+            </div>
+          </div>
+          <div className="card-body">
+            <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill, minmax(280px, 1fr))',gap:20}}>
+              {leaveBalances.length === 0 ? (
+                <div style={{gridColumn:'1/-1',padding:40,textAlign:'center',color:'var(--text-3)'}}>No leave balances allocated for this year.</div>
+              ) : leaveBalances.map(lb => {
+                const remaining = lb.total_allocated - lb.used;
+                const pct = (lb.used / lb.total_allocated) * 100;
+                const color = lb.leave_type === 'sick' ? 'var(--danger)' : lb.leave_type === 'annual' ? 'var(--success)' : 'var(--primary)';
+                return (
+                  <div key={lb.id} style={{padding:20,border:'1px solid var(--border)',borderRadius:12,background:'var(--surface)'}}>
+                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:12}}>
+                      <div style={{textTransform:'capitalize',fontWeight:700,fontSize:15,color:'var(--text)'}}>{lb.leave_type} Leave</div>
+                      <div style={{fontSize:18,fontWeight:800,color:color}}>{remaining} <span style={{fontSize:11,fontWeight:500,color:'var(--text-3)'}}>Days Left</span></div>
+                    </div>
+                    <div style={{height:8,background:'var(--surface-2)',borderRadius:4,overflow:'hidden',marginBottom:8}}>
+                      <div style={{height:'100%',width:`${Math.min(pct, 100)}%`,background:color,transition:'width 0.5s ease'}} />
+                    </div>
+                    <div style={{display:'flex',justifyContent:'space-between',fontSize:12,color:'var(--text-3)',fontWeight:500}}>
+                      <span>Used: {lb.used}</span>
+                      <span>Total: {lb.total_allocated}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{marginTop:24,padding:16,background:'var(--surface-2)',borderRadius:8,fontSize:12,color:'var(--text-3)',lineHeight:1.6}}>
+              <strong>Note:</strong> Leave balances are reset annually. Approved time-off requests automatically deduct from these balances. For any discrepancies, please contact HR.
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── SECURITY TAB ── */}
       {tab==='security' && isOwnProfile && (

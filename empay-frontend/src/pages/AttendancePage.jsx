@@ -81,10 +81,63 @@ export default function AttendancePage() {
       )
     : logs;
 
+  const [statusFilter, setStatusFilter] = useState('all');
+
   const stats = visibleLogs.reduce((acc, l) => {
     acc[l.status] = (acc[l.status] || 0) + 1;
     return acc;
   }, {});
+
+  const renderTable = (data, title, isTimeIrrelevant = false) => {
+    if (data.length === 0 && statusFilter !== 'all') return null;
+    return (
+      <div style={{ marginBottom: 30 }}>
+        {statusFilter === 'all' && (
+          <div style={{ padding: '8px 20px', background: 'var(--surface-2)', borderBottom: '1px solid var(--border)', fontSize: 12, fontWeight: 700, color: 'var(--text-2)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            {title} — {data.length} records
+          </div>
+        )}
+        <div className="table-wrap">
+          <table className="data-table">
+            <thead>
+              <tr>
+                {!isEmployee && <th>Employee</th>}
+                <th>Date</th>
+                {!isTimeIrrelevant && (
+                  <>
+                    <th>Check In</th><th>Check Out</th><th>Hours</th>
+                  </>
+                )}
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.length === 0 ? (
+                <tr><td colSpan={!isEmployee ? 6 : 5} style={{ textAlign: 'center', padding: 40, color: 'var(--text-3)' }}>No {title.toLowerCase()} records found</td></tr>
+              ) : data.map(log => (
+                <tr key={log.id}>
+                  {!isEmployee && <td><div style={{ fontWeight: 600 }}>{log.first_name} {log.last_name}</div><div style={{ fontSize: 11, color: 'var(--text-4)' }}>{log.employee_code}</div></td>}
+                  <td style={{ fontWeight: 500 }}>{fmtDate(log.date)}</td>
+                  {!isTimeIrrelevant && (
+                    <>
+                      <td>{fmtTime(log.check_in)}</td>
+                      <td>{fmtTime(log.check_out)}</td>
+                      <td>{log.total_hours ? `${log.total_hours}h` : '—'}</td>
+                    </>
+                  )}
+                  <td><span className={`badge ${STATUS_BADGE[log.status] || 'badge-default'}`}>{log.status?.replace('_',' ')}</span></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  };
+
+  const presentLogs = visibleLogs.filter(l => l.status === 'present' || l.status === 'half_day');
+  const absentLogs = visibleLogs.filter(l => l.status === 'absent');
+  const leaveLogs = visibleLogs.filter(l => l.status === 'on_leave');
 
   return (
     <div>
@@ -142,24 +195,50 @@ export default function AttendancePage() {
         </div>
       )}
 
-      {/* Monthly stats */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12, marginBottom: 20 }}>
+      {/* Monthly stats — Clickable filters */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 12, marginBottom: 20 }}>
+        <div 
+          onClick={() => setStatusFilter('all')}
+          style={{ 
+            cursor: 'pointer',
+            background: statusFilter === 'all' ? 'var(--primary)' : 'var(--surface)', 
+            border: `1px solid ${statusFilter === 'all' ? 'var(--primary)' : 'var(--border)'}`, 
+            borderRadius: 'var(--radius)', padding: '14px 18px',
+            color: statusFilter === 'all' ? '#fff' : 'var(--text)',
+            transition: 'all 0.2s'
+          }}
+        >
+          <div style={{ fontSize: 24, fontWeight: 700 }}>{visibleLogs.length}</div>
+          <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', opacity: 0.8 }}>All Records</div>
+        </div>
         {[
-          { label: 'Present', count: stats.present || 0, color: 'var(--success)', bg: 'var(--success-light)' },
-          { label: 'Absent', count: stats.absent || 0, color: 'var(--danger)', bg: 'var(--danger-light)' },
-          { label: 'Half Day', count: stats.half_day || 0, color: 'var(--warning)', bg: 'var(--warning-light)' },
-          { label: 'On Leave', count: stats.on_leave || 0, color: 'var(--info)', bg: 'var(--info-light)' },
+          { id: 'present', label: 'Present', count: (stats.present || 0) + (stats.half_day || 0), color: 'var(--success)', bg: 'var(--success-light)' },
+          { id: 'absent', label: 'Absent', count: stats.absent || 0, color: 'var(--danger)', bg: 'var(--danger-light)' },
+          { id: 'half_day', label: 'Half Day', count: stats.half_day || 0, color: 'var(--warning)', bg: 'var(--warning-light)' },
+          { id: 'on_leave', label: 'On Leave', count: stats.on_leave || 0, color: 'var(--info)', bg: 'var(--info-light)' },
         ].map(s => (
-          <div key={s.label} style={{ background: s.bg, border: `1px solid ${s.color}22`, borderRadius: 'var(--radius)', padding: '14px 18px', borderLeft: `4px solid ${s.color}` }}>
-            <div style={{ fontSize: 24, fontWeight: 700, color: s.color }}>{s.count}</div>
-            <div style={{ fontSize: 11, fontWeight: 600, color: s.color, textTransform: 'uppercase', letterSpacing: '0.04em' }}>{s.label}</div>
+          <div 
+            key={s.id} 
+            onClick={() => setStatusFilter(s.id)}
+            style={{ 
+              cursor: 'pointer',
+              background: statusFilter === s.id ? s.color : s.bg, 
+              border: `1px solid ${statusFilter === s.id ? s.color : s.color + '22'}`, 
+              borderRadius: 'var(--radius)', padding: '14px 18px', borderLeft: `4px solid ${s.color}`,
+              color: statusFilter === s.id ? '#fff' : s.color,
+              transition: 'all 0.2s',
+              transform: statusFilter === s.id ? 'translateY(-2px)' : 'none',
+              boxShadow: statusFilter === s.id ? '0 4px 12px rgba(0,0,0,0.1)' : 'none'
+            }}
+          >
+            <div style={{ fontSize: 24, fontWeight: 700 }}>{s.count}</div>
+            <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', opacity: statusFilter === s.id ? 0.9 : 1 }}>{s.label}</div>
           </div>
         ))}
       </div>
 
       {/* Filters */}
       <div className="filter-bar" style={{ flexWrap: 'wrap', gap: 8 }}>
-        {/* Month + Year selectors — disabled when specific date is active */}
         <select
           className="form-control"
           style={{ width: 140, opacity: filters.date ? 0.45 : 1 }}
@@ -220,42 +299,31 @@ export default function AttendancePage() {
         )}
       </div>
 
-      {/* Logs table */}
+      {/* Segregated Logs */}
       <div className="card">
-        <div className="card-header">
+        <div className="card-header" style={{ borderBottom: statusFilter === 'all' ? 'none' : '1px solid var(--border)' }}>
           <div className="card-title">
-            Attendance Log —{' '}
+            {statusFilter === 'all' ? 'Attendance Log — Detailed Sections' : `${statusFilter.replace('_',' ').toUpperCase()} Logs`} —{' '}
             {filters.date
               ? new Date(filters.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
               : `${MONTHS[filters.month - 1]} ${filters.year}`
             }
-            {!isEmployee && search && <span style={{ fontSize: 12, fontWeight: 400, color: 'var(--text-3)', marginLeft: 8 }}>— {visibleLogs.length} result{visibleLogs.length !== 1 ? 's' : ''} for "{search}"</span>}
           </div>
         </div>
         {loading ? <div style={{ padding: 40, textAlign: 'center' }}><div className="spinner" style={{ margin: '0 auto' }} /></div> : (
-          <div className="table-wrap">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  {!isEmployee && <th>Employee</th>}
-                  <th>Date</th><th>Check In</th><th>Check Out</th><th>Hours</th><th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {visibleLogs.length === 0 ? (
-                  <tr><td colSpan={!isEmployee ? 6 : 5} style={{ textAlign: 'center', padding: 40, color: 'var(--text-3)' }}>No records found{search ? ` for "${search}"` : ''}</td></tr>
-                ) : visibleLogs.map(log => (
-                  <tr key={log.id}>
-                    {!isEmployee && <td><div style={{ fontWeight: 600 }}>{log.first_name} {log.last_name}</div><div style={{ fontSize: 11, color: 'var(--text-4)' }}>{log.employee_code}</div></td>}
-                    <td style={{ fontWeight: 500 }}>{fmtDate(log.date)}</td>
-                    <td>{fmtTime(log.check_in)}</td>
-                    <td>{fmtTime(log.check_out)}</td>
-                    <td>{log.total_hours ? `${log.total_hours}h` : '—'}</td>
-                    <td><span className={`badge ${STATUS_BADGE[log.status] || 'badge-default'}`}>{log.status?.replace('_',' ')}</span></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div>
+            {statusFilter === 'all' ? (
+              <>
+                {renderTable(presentLogs, 'Present / Half Day')}
+                {renderTable(absentLogs, 'Absent', true)}
+                {renderTable(leaveLogs, 'On Leave', true)}
+              </>
+            ) : (
+              renderTable(visibleLogs.filter(l => {
+                if (statusFilter === 'present') return l.status === 'present' || l.status === 'half_day';
+                return l.status === statusFilter;
+              }), statusFilter.toUpperCase(), statusFilter === 'absent' || statusFilter === 'on_leave')
+            )}
           </div>
         )}
       </div>

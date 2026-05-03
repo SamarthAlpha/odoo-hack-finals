@@ -22,13 +22,13 @@ const apply = async (req, res) => {
 
     const { leave_type, start_date, end_date, reason } = req.body;
 
-    // Sick leave requires a document
-    if (leave_type === 'sick' && !req.file) {
-      return res.status(400).json({ success: false, message: 'A supporting document is required for sick leave' });
-    }
-
     const totalDays = calcBusinessDays(start_date, end_date);
     const documentPath = req.file ? req.file.filename : null;
+
+    // Sick leave requires a document for 4 or more days
+    if (leave_type === 'sick' && totalDays >= 4 && !req.file) {
+      return res.status(400).json({ success: false, message: 'A supporting document is required for sick leave of 4 or more days' });
+    }
 
     // Check leave balance
     const year = new Date(start_date).getFullYear();
@@ -41,6 +41,8 @@ const apply = async (req, res) => {
         const remaining = bal[0].total_allocated - bal[0].used;
         if (totalDays > remaining)
           return res.status(400).json({ success: false, message: `Insufficient ${leave_type} leave balance. Available: ${remaining} days` });
+      } else {
+        return res.status(400).json({ success: false, message: `No ${leave_type} leave has been allocated for ${year}.` });
       }
     }
 
@@ -184,4 +186,21 @@ const allocate = async (req, res) => {
   }
 };
 
-module.exports = { apply, myRequests, allRequests, approve, reject, getBalances, allocate };
+// All balances (Admin/HR)
+const getAllBalances = async (req, res) => {
+  try {
+    const year = req.query.year || new Date().getFullYear();
+    const [rows] = await db.execute(
+      `SELECT lb.*, e.first_name, e.last_name, e.employee_code, e.department
+       FROM leave_balances lb
+       JOIN employees e ON e.id = lb.employee_id
+       WHERE lb.year = ? ORDER BY e.employee_code ASC`,
+      [year]
+    );
+    res.json({ success: true, data: rows });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+module.exports = { apply, myRequests, allRequests, approve, reject, getBalances, allocate, getAllBalances };
