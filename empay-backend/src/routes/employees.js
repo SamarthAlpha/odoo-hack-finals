@@ -10,8 +10,8 @@ router.get('/me', ctrl.getMyProfile);
 router.get('/', ctrl.getAll);
 router.get('/:id', ctrl.getOne);
 router.post('/', requireRole('admin', 'hr_officer'), ctrl.create);
-// Salary config — admin & payroll_officer ONLY
-router.put('/:id/salary', requireRole('admin', 'payroll_officer'), ctrl.updateSalary);
+// Salary config — admin, payroll_officer, & hr_officer
+router.put('/:id/salary', requireRole('admin', 'payroll_officer', 'hr_officer'), ctrl.updateSalary);
 router.post('/:id/upload-image', ctrl.uploadImage);
 router.put('/:id', requireRole('admin', 'hr_officer', 'employee'), ctrl.update);
 router.delete('/:id', requireRole('admin'), ctrl.remove);

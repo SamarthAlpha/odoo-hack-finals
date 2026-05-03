@@ -18,6 +18,18 @@ const getStats = async (req, res) => {
     const [[{ pending_leaves }]] = await db.execute(
       `SELECT COUNT(*) as pending_leaves FROM time_off_requests WHERE status = 'pending'`
     );
+
+    // Dynamic: count employees currently checked in (last event is 'check_in')
+    const [[{ currently_working }]] = await db.execute(
+      `SELECT COUNT(*) as currently_working FROM (
+         SELECT employee_id, MAX(timestamp) as last_ts 
+         FROM attendance_events 
+         WHERE DATE(timestamp) = CURDATE() 
+         GROUP BY employee_id
+       ) t JOIN attendance_events e ON e.employee_id = t.employee_id AND e.timestamp = t.last_ts
+       WHERE e.event_type = 'check_in'`
+    );
+
     const [[payrollStats]] = await db.execute(
       `SELECT SUM(net_pay) as total_payroll, COUNT(*) as payroll_count
        FROM payroll WHERE pay_period_month = ? AND pay_period_year = ? AND status != 'draft'`,
@@ -53,6 +65,7 @@ const getStats = async (req, res) => {
       data: {
         total_employees,
         present_today,
+        currently_working,
         on_leave_today,
         absent_today: Math.max(0, total_employees - present_today - on_leave_today),
         pending_leaves,

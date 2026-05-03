@@ -9,19 +9,19 @@ const checkIn = async (req, res) => {
     const today = new Date().toISOString().split('T')[0];
     const now = new Date();
 
-    // Check if already checked in
-    const [events] = await db.execute(
-      `SELECT * FROM attendance_events WHERE employee_id = ? AND DATE(timestamp) = ? AND event_type = 'check_in'`, [empId, today]
+    // Allow check-in if last event was check_out or no events today
+    const [lastEvent] = await db.execute(
+      `SELECT event_type FROM attendance_events WHERE employee_id = ? AND DATE(timestamp) = CURDATE() ORDER BY timestamp DESC LIMIT 1`, [empId]
     );
 
-    if (events.length > 0) {
-      return res.status(400).json({ success: false, message: 'Already checked in today' });
+    if (lastEvent.length > 0 && lastEvent[0].event_type === 'check_in') {
+      return res.status(400).json({ success: false, message: 'Already checked in' });
     }
 
     // Check if on approved leave today
     const [leave] = await db.execute(
-      `SELECT id FROM time_off_requests WHERE employee_id = ? AND status='approved' AND ? BETWEEN start_date AND end_date`,
-      [empId, today]
+      `SELECT id FROM time_off_requests WHERE employee_id = ? AND status='approved' AND CURDATE() BETWEEN start_date AND end_date`,
+      [empId]
     );
 
     if (leave.length) {
@@ -37,9 +37,9 @@ const checkIn = async (req, res) => {
     // Update summary
     await db.execute(
       `INSERT INTO attendance_summary (employee_id, date, status, total_hours)
-       VALUES (?, ?, 'present', 0)
+       VALUES (?, CURDATE(), 'present', 0)
        ON DUPLICATE KEY UPDATE status = 'present'`,
-      [empId, today]
+      [empId]
     );
 
     res.json({ success: true, message: 'Checked in successfully', time: now });
@@ -57,14 +57,14 @@ const checkOut = async (req, res) => {
     const now = new Date();
 
     const [checkInEvents] = await db.execute(
-      `SELECT timestamp FROM attendance_events WHERE employee_id = ? AND DATE(timestamp) = ? AND event_type = 'check_in' ORDER BY timestamp DESC LIMIT 1`, [empId, today]
+      `SELECT timestamp FROM attendance_events WHERE employee_id = ? AND DATE(timestamp) = CURDATE() AND event_type = 'check_in' ORDER BY timestamp DESC LIMIT 1`, [empId]
     );
 
     if (!checkInEvents.length)
       return res.status(400).json({ success: false, message: 'Please check in first' });
 
     const [checkOutEvents] = await db.execute(
-      `SELECT timestamp FROM attendance_events WHERE employee_id = ? AND DATE(timestamp) = ? AND event_type = 'check_out' ORDER BY timestamp DESC LIMIT 1`, [empId, today]
+      `SELECT timestamp FROM attendance_events WHERE employee_id = ? AND DATE(timestamp) = CURDATE() AND event_type = 'check_out' ORDER BY timestamp DESC LIMIT 1`, [empId]
     );
 
     if (checkOutEvents.length && checkOutEvents[0].timestamp > checkInEvents[0].timestamp)
@@ -81,7 +81,7 @@ const checkOut = async (req, res) => {
     
     // Get existing total_hours from summary
     const [summary] = await db.execute(
-      `SELECT total_hours FROM attendance_summary WHERE employee_id = ? AND date = ?`, [empId, today]
+      `SELECT total_hours FROM attendance_summary WHERE employee_id = ? AND date = CURDATE()`, [empId]
     );
     const prevHours = summary.length && summary[0].total_hours ? parseFloat(summary[0].total_hours) : 0;
     const newTotal = prevHours + totalHours;
@@ -91,8 +91,8 @@ const checkOut = async (req, res) => {
     else if (newTotal >= 4 && newTotal < 8) status = 'present';
 
     await db.execute(
-      `UPDATE attendance_summary SET total_hours = ?, status = ? WHERE employee_id = ? AND date = ?`,
-      [newTotal.toFixed(2), status, empId, today]
+      `UPDATE attendance_summary SET total_hours = ?, status = ? WHERE employee_id = ? AND date = CURDATE()`,
+      [newTotal.toFixed(2), status, empId]
     );
 
     res.json({ success: true, message: 'Checked out successfully', total_hours: newTotal.toFixed(2), status });
@@ -106,17 +106,17 @@ const checkOut = async (req, res) => {
 const todayStatus = async (req, res) => {
   try {
     const empId = req.user.employee_id;
-    const today = new Date().toISOString().split('T')[0];
 
     const [att] = await db.execute(
       `SELECT a.*,
        (SELECT MIN(timestamp) FROM attendance_events WHERE employee_id=a.employee_id AND DATE(timestamp)=a.date AND event_type='check_in') as check_in,
-       (SELECT MAX(timestamp) FROM attendance_events WHERE employee_id=a.employee_id AND DATE(timestamp)=a.date AND event_type='check_out') as check_out
-       FROM attendance_summary a WHERE a.employee_id = ? AND a.date = ?`, [empId, today]
+       (SELECT MAX(timestamp) FROM attendance_events WHERE employee_id=a.employee_id AND DATE(timestamp)=a.date AND event_type='check_out') as check_out,
+       (SELECT event_type FROM attendance_events WHERE employee_id=a.employee_id AND DATE(timestamp)=a.date ORDER BY timestamp DESC LIMIT 1) as last_event_type
+       FROM attendance_summary a WHERE a.employee_id = ? AND a.date = CURDATE()`, [empId]
     );
     const [leave] = await db.execute(
-      `SELECT * FROM time_off_requests WHERE employee_id = ? AND status='approved' AND ? BETWEEN start_date AND end_date`,
-      [empId, today]
+      `SELECT * FROM time_off_requests WHERE employee_id = ? AND status='approved' AND CURDATE() BETWEEN start_date AND end_date`,
+      [empId]
     );
 
     res.json({
@@ -174,7 +174,13 @@ const myLogs = async (req, res) => {
     const existingMap = {};
     for (const r of existing) {
       let dStr = r.date;
-      if (typeof r.date !== 'string') dStr = r.date.toISOString().split('T')[0];
+      if (r.date instanceof Date) {
+        // Correctly get YYYY-MM-DD in local time
+        const y = r.date.getFullYear();
+        const m = String(r.date.getMonth() + 1).padStart(2, '0');
+        const d = String(r.date.getDate()).padStart(2, '0');
+        dStr = `${y}-${m}-${d}`;
+      }
       existingMap[dStr] = r;
     }
 
@@ -250,7 +256,12 @@ const allLogs = async (req, res) => {
     const existingMap = {};
     for (const r of existing) {
       let dStr = r.date;
-      if (typeof r.date !== 'string') dStr = r.date.toISOString().split('T')[0];
+      if (r.date instanceof Date) {
+        const y = r.date.getFullYear();
+        const m = String(r.date.getMonth() + 1).padStart(2, '0');
+        const d = String(r.date.getDate()).padStart(2, '0');
+        dStr = `${y}-${m}-${d}`;
+      }
       existingMap[r.employee_id + '_' + dStr] = r;
     }
 

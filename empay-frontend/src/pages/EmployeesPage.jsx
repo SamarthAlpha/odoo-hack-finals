@@ -21,17 +21,17 @@ function StatusDot({ emp }) {
       }}>✈️</span>
     );
   }
-  if (emp.today_attendance === 'present' || emp.today_attendance === 'half_day') {
+  if (emp.last_event_type === 'check_in') {
     return (
-      <span title="Present" style={{
+      <span title="Present (Checked In)" style={{
         position: 'absolute', top: 14, right: 14, width: 12, height: 12, borderRadius: '50%',
         background: '#22c55e', display: 'inline-block', boxShadow: '0 0 0 2px #fff, 0 0 0 3px #22c55e',
       }} />
     );
   }
-  // Absent (yellow)
+  // Absent/Away (yellow)
   return (
-    <span title="Absent" style={{
+    <span title={emp.last_event_type === 'check_out' ? "Away (Checked Out)" : "Absent"} style={{
       position: 'absolute', top: 14, right: 14, width: 12, height: 12, borderRadius: '50%',
       background: '#eab308', display: 'inline-block', boxShadow: '0 0 0 2px #fff, 0 0 0 3px #eab308',
     }} />
@@ -296,7 +296,7 @@ export default function EmployeesPage() {
                                 >
                                   {!emp.profile_image && getInitials(emp.first_name, emp.last_name)}
                                 </div>
-                                <span style={{position:'absolute',bottom:-2,right:-2,width:9,height:9,borderRadius:'50%',background:emp.on_leave_today?'#3b82f6':(emp.today_attendance==='present'||emp.today_attendance==='half_day')?'#22c55e':'#eab308',border:'1.5px solid #fff'}}/>
+                                <span style={{position:'absolute',bottom:-2,right:-2,width:9,height:9,borderRadius:'50%',background:emp.on_leave_today?'#3b82f6':(emp.last_event_type==='check_in')?'#22c55e':'#eab308',border:'1.5px solid #fff'}}/>
                               </div>
                               <div><div style={{ fontWeight: 600 }}>{emp.first_name} {emp.last_name}</div><div style={{ fontSize: 11, color: 'var(--text-4)' }}>{emp.employee_code}</div></div>
                             </div>

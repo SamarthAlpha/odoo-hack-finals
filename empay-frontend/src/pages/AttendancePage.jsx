@@ -39,6 +39,7 @@ export default function AttendancePage() {
   };
 
   useEffect(() => {
+    loadToday();
     if (!isEmployee) {
       api.get('/employees').then(r => setEmployees(Array.isArray(r) ? r : []));
     }
@@ -46,6 +47,7 @@ export default function AttendancePage() {
 
   useEffect(() => {
     loadLogs();
+    if (isEmployee) loadToday();
   }, [filters, isEmployee]);
 
   const checkIn = async () => {
@@ -123,20 +125,14 @@ export default function AttendancePage() {
               <div style={{ display: 'flex', gap: 12 }}>
                 {!onLeave && (
                   <>
-                    {!att?.check_in && (
+                    {(!att || !att.last_event_type || att.last_event_type === 'check_out') ? (
                       <button className="btn btn-success btn-lg" onClick={checkIn} disabled={actionLoading} style={{ minWidth: 140, justifyContent: 'center' }}>
                         {actionLoading ? '...' : '🟢 Check In'}
                       </button>
-                    )}
-                    {att?.check_in && !att?.check_out && (
+                    ) : (
                       <button className="btn btn-danger btn-lg" onClick={checkOut} disabled={actionLoading} style={{ minWidth: 140, justifyContent: 'center' }}>
                         {actionLoading ? '...' : '🔴 Check Out'}
                       </button>
-                    )}
-                    {att?.check_in && att?.check_out && (
-                      <div style={{ padding: '12px 20px', background: 'var(--success-light)', border: '1.5px solid var(--success)', borderRadius: 'var(--radius)', color: 'var(--success)', fontWeight: 600, fontSize: 14 }}>
-                        ✅ Completed for today
-                      </div>
                     )}
                   </>
                 )}

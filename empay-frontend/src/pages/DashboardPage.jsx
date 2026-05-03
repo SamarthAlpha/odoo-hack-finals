@@ -37,7 +37,8 @@ export default function DashboardPage() {
 
   const statCards = [
     { label: 'Total Employees', value: stats?.total_employees || 0, icon: '👥', color: '#1e3a8a', bg: '#dbeafe', change: 'Active staff' },
-    { label: 'Present Today', value: stats?.present_today || 0, icon: '✅', color: '#059669', bg: '#d1fae5', change: `of ${stats?.total_employees}` },
+    { label: 'Present Today', value: stats?.present_today || 0, icon: '✅', color: '#059669', bg: '#d1fae5', change: `Cumulative` },
+    { label: 'Active Now', value: stats?.currently_working || 0, icon: '⚡', color: '#0ea5e9', bg: '#e0f2fe', change: 'Currently working' },
     { label: 'On Leave', value: stats?.on_leave_today || 0, icon: '✈️', color: '#d97706', bg: '#fef3c7', change: 'Today' },
     { label: 'Pending Requests', value: stats?.pending_leaves || 0, icon: '⏳', color: '#dc2626', bg: '#fee2e2', change: 'Awaiting approval' },
   ];

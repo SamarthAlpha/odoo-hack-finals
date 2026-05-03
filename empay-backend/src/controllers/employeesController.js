@@ -119,7 +119,8 @@ const getAll = async (req, res) => {
                         e.profile_image, e.status,
                         u.email, u.role, u.is_active, u.login_id,
         (SELECT status FROM attendance_summary WHERE employee_id = e.id AND date = CURDATE() LIMIT 1) AS today_attendance,
-        (SELECT 1 FROM time_off_requests WHERE employee_id = e.id AND status='approved' AND CURDATE() BETWEEN start_date AND end_date LIMIT 1) AS on_leave_today
+        (SELECT 1 FROM time_off_requests WHERE employee_id = e.id AND status='approved' AND CURDATE() BETWEEN start_date AND end_date LIMIT 1) AS on_leave_today,
+        (SELECT event_type FROM attendance_events WHERE employee_id = e.id AND DATE(timestamp) = CURDATE() ORDER BY timestamp DESC LIMIT 1) AS last_event_type
        FROM employees e JOIN users u ON u.id = e.user_id
        WHERE 1=1`;
     const params = [];

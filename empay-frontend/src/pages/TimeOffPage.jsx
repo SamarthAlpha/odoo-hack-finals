@@ -13,11 +13,26 @@ function ApplyModal({ onClose, onSave }) {
   const [form, setForm] = useState({ leave_type: 'casual', start_date: '', end_date: '', reason: '' });
   const [docFile, setDocFile] = useState(null);
   const [loading, setLoading] = useState(false);
+
+  const getDuration = () => {
+    if (!form.start_date || !form.end_date) return 0;
+    const s = new Date(form.start_date);
+    const e = new Date(form.end_date);
+    const diffTime = Math.abs(e - s);
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
+    return diffDays;
+  };
+
+  const duration = getDuration();
   const isSick = form.leave_type === 'sick';
+  const isDocRequired = isSick && duration >= 3;
 
   const save = async (e) => {
     e.preventDefault();
-    if (isSick && !docFile) { toast.error('Please upload a supporting document for sick leave'); return; }
+    if (isDocRequired && !docFile) {
+      toast.error('Supporting document is required for sick leave of 3 or more days');
+      return;
+    }
     setLoading(true);
     try {
       const fd = new FormData();
@@ -56,13 +71,13 @@ function ApplyModal({ onClose, onSave }) {
             <div className="form-group">
               <label className="form-label">
                 Supporting Document
-                {isSick
-                  ? <span style={{color:'var(--danger)',marginLeft:4}}>* (Required for Sick Leave)</span>
-                  : <span style={{color:'var(--text-3)',marginLeft:4,fontSize:11}}>(Optional)</span>
+                {isDocRequired
+                  ? <span style={{color:'var(--danger)',marginLeft:4}}>* (Required for Sick Leave ≥ 3 days)</span>
+                  : <span style={{color:'var(--text-3)',marginLeft:4,fontSize:11}}>{isSick ? '(Optional for < 3 days)' : '(Optional)'}</span>
                 }
               </label>
               <div style={{
-                border: `2px dashed ${isSick && !docFile ? 'var(--danger)' : 'var(--border)'}`,
+                border: `2px dashed ${isDocRequired && !docFile ? 'var(--danger)' : 'var(--border)'}`,
                 borderRadius: 'var(--radius)', padding: '14px 16px',
                 background: 'var(--surface)', transition: 'border-color 0.2s',
               }}>
@@ -252,7 +267,7 @@ export default function TimeOffPage() {
                 <tr>
                   {!isEmployee && <th>Employee</th>}
                   <th>Type</th><th>From</th><th>To</th><th>Days</th><th>Reason</th><th>Status</th><th>Document</th>
-                  {can('admin','payroll_officer') && <th>Actions</th>}
+                  {can('admin','payroll_officer','hr_officer') && <th>Actions</th>}
                 </tr>
               </thead>
               <tbody>
@@ -277,7 +292,7 @@ export default function TimeOffPage() {
                         : <span style={{ fontSize:11, color:'var(--text-4)' }}>—</span>
                       }
                     </td>
-                    {can('admin','payroll_officer') && (
+                    {can('admin','payroll_officer','hr_officer') && (
                       <td>
                         {r.status === 'pending' && (
                           <div style={{ display:'flex', gap:6 }}>

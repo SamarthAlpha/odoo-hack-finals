@@ -39,8 +39,8 @@ router.get('/balances/:employee_id', ctrl.getBalances);
 router.get('/balances', ctrl.getBalances);
 router.post('/apply', requireRole('employee'), upload.single('document'), ctrl.apply);
 router.get('/', requireRole('admin', 'hr_officer', 'payroll_officer'), ctrl.allRequests);
-router.put('/:id/approve', requireRole('admin', 'payroll_officer'), ctrl.approve);
-router.put('/:id/reject', requireRole('admin', 'payroll_officer'), ctrl.reject);
+router.put('/:id/approve', requireRole('admin', 'payroll_officer', 'hr_officer'), ctrl.approve);
+router.put('/:id/reject', requireRole('admin', 'payroll_officer', 'hr_officer'), ctrl.reject);
 router.post('/allocate', requireRole('admin', 'hr_officer'), ctrl.allocate);
 
 module.exports = router;

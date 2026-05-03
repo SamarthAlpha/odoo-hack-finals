@@ -279,7 +279,7 @@ export default function EmployeeProfilePage() {
   const canEdit = can('admin','hr_officer') || (user?.employee_id == id);
   const canSeePrivate = can('admin','hr_officer') || (user?.employee_id == id);
   const canSeeSalary = can('admin','payroll_officer','hr_officer');
-  const canEditSalary = can('admin','payroll_officer');
+  const canEditSalary = can('admin','payroll_officer','hr_officer');
   const isOwnProfile = user?.employee_id == id;
   const isEmployee = user?.role === 'employee';
 
