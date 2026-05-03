@@ -135,8 +135,8 @@ const getAll = async (req, res) => {
     const [rows] = await db.execute(query, params);
     res.json({ success: true, data: rows });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ success: false, message: 'Server error' });
+    console.error('Update error:', err);
+    res.status(500).json({ success: false, message: 'Server error: ' + err.message });
   }
 };
 
@@ -274,7 +274,12 @@ const update = async (req, res) => {
     }
 
     const b = req.body;
-    let wage = b.wage;    // Determine which percentages to use (keep existing if not provided)
+    const n = (v) => {
+      if (v === "" || v === undefined || v === null) return null;
+      if (typeof v === 'string' && v.includes('T') && v.length > 10) return v.split('T')[0];
+      return v;
+    };
+    let wage = n(b.wage);    // Determine which percentages to use (keep existing if not provided)
     const [existing] = await db.execute(`SELECT * FROM employees WHERE id=?`, [req.params.id]);
     const ex = existing[0] || {};
 
@@ -331,23 +336,23 @@ const update = async (req, res) => {
         pf_rate=COALESCE(?,pf_rate),
         working_days_per_week=COALESCE(?,working_days_per_week), break_time_hrs=COALESCE(?,break_time_hrs)
        WHERE id=?`,
-      [b.first_name, b.last_name, b.department, b.designation, b.date_of_joining, b.phone,
-       b.address, b.pan_number, b.uan_number, b.bank_account, b.bank_name, b.ifsc_code,
-       b.uam_id, b.location, b.manager_id || null, b.status,
+      [n(b.first_name), n(b.last_name), n(b.department), n(b.designation), n(b.date_of_joining), n(b.phone),
+       n(b.address), n(b.pan_number), n(b.uan_number), n(b.bank_account), n(b.bank_name), n(b.ifsc_code),
+       n(b.uam_id), n(b.location), n(b.manager_id) || null, n(b.status),
        wage, c.basicSalary, c.hraAmount, c.standardAllow, c.performanceBonus, c.ltaAmount, c.fixedAllowance,
        c.annualSalary, c.employeePf, c.employerPf, c.grossSalary, c.totalDeductions, c.netSalary,
-       b.basic_pct, b.hra_pct, b.standard_allowance_pct, b.perf_pct, b.lta_pct,
-       b.employee_pf_pct, b.employer_pf_pct, b.prof_tax_amount,
-       b.birth_date, b.gender, b.marital_status, b.nationality, b.personal_email, b.permanent_address,
-       b.about, b.skills, b.certifications,
-       b.work_passion, b.hobbies,
-       b.pf_rate, b.working_days_per_week, b.break_time_hrs,
+       n(b.basic_pct), n(b.hra_pct), n(b.standard_allowance_pct), n(b.perf_pct), n(b.lta_pct),
+       n(b.employee_pf_pct), n(b.employer_pf_pct), n(b.prof_tax_amount),
+       n(b.birth_date), n(b.gender), n(b.marital_status), n(b.nationality), n(b.personal_email), n(b.permanent_address),
+       n(b.about), n(b.skills), n(b.certifications),
+       n(b.work_passion), n(b.hobbies),
+       n(b.pf_rate), n(b.working_days_per_week), n(b.break_time_hrs),
        req.params.id]
     );
     res.json({ success: true, message: 'Employee updated' });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ success: false, message: 'Server error' });
+    console.error('Update error:', err);
+    res.status(500).json({ success: false, message: 'Server error: ' + err.message });
   }
 };
 
@@ -422,7 +427,11 @@ const uploadImage = (req, res) => {
 const updateSalary = async (req, res) => {
   try {
     const { id } = req.params;
-    const safeNum = (v, fallback) => { const n = parseFloat(v); return isNaN(n) ? fallback : n; };
+    const safeNum = (v, fallback) => {
+      if (v === "" || v === undefined || v === null) return fallback;
+      const n = parseFloat(v);
+      return isNaN(n) ? fallback : n;
+    };
 
     const wage                   = req.body.wage;
     const working_days_per_week  = req.body.working_days_per_week;
@@ -482,8 +491,8 @@ const updateSalary = async (req, res) => {
       },
     });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ success: false, message: 'Server error' });
+    console.error('Update error:', err);
+    res.status(500).json({ success: false, message: 'Server error: ' + err.message });
   }
 };
 

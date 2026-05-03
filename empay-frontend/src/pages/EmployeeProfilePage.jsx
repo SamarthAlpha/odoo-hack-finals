@@ -96,6 +96,37 @@ function InlineEdit({ value, onSave, multiline, canEdit }) {
   );
 }
 
+// Field render helper
+const Field = ({label, value}) => (
+  <div style={{marginBottom:16}}>
+    <div style={{fontSize:11,fontWeight:700,color:'var(--text-3)',textTransform:'uppercase',letterSpacing:'0.06em',marginBottom:4}}>{label}</div>
+    <div style={{fontSize:14,color:'var(--text)',fontWeight:500}}>{value||'—'}</div>
+  </div>
+);
+
+const InputField = ({label, k, form, onChange, type='text', required}) => (
+  <div className="form-group">
+    <label className="form-label">{label}{required&&'*'}</label>
+    <input className="form-control" type={type} value={form[k]?.toString?.()?.split?.('T')?.[0]||form[k]||''} onChange={e=>onChange(k,e.target.value)} />
+  </div>
+);
+
+const LF = ({label, value}) => (
+  <div style={{marginBottom:14}}>
+    <div style={{fontSize:11,fontWeight:700,color:'var(--text-3)',textTransform:'uppercase',letterSpacing:'0.06em',marginBottom:3}}>{label}</div>
+    <div style={{fontSize:13,fontWeight:500,color:'var(--text)',borderBottom:'1px solid var(--border)',paddingBottom:6}}>{value||'—'}</div>
+  </div>
+);
+
+const EditPct = ({ k, salaryForm, onChange }) => (
+  <div style={{display:'flex',alignItems:'center',gap:4}}>
+    <input type="number" min="0" max="100" step="0.01" value={salaryForm[k]}
+      onChange={e=>onChange(k,e.target.value)}
+      style={{width:64,padding:'2px 6px',fontSize:12,border:'1px solid var(--primary)',borderRadius:6,textAlign:'right'}} />
+    <span style={{fontSize:12,color:'var(--text-3)'}}>%</span>
+  </div>
+);
+
 export default function EmployeeProfilePage() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -278,32 +309,13 @@ export default function EmployeeProfilePage() {
   const pfEr  = Math.round(basic*0.12*100)/100;
   const profTax = wage > 15000 ? 200 : 0;
 
-  // Field render helper
-  const Field = ({label, value}) => (
-    <div style={{marginBottom:16}}>
-      <div style={{fontSize:11,fontWeight:700,color:'var(--text-3)',textTransform:'uppercase',letterSpacing:'0.06em',marginBottom:4}}>{label}</div>
-      <div style={{fontSize:14,color:'var(--text)',fontWeight:500}}>{value||'—'}</div>
-    </div>
-  );
 
-  const InputField = ({label, k, type='text', required}) => (
-    <div className="form-group">
-      <label className="form-label">{label}{required&&'*'}</label>
-      <input className="form-control" type={type} value={form[k]?.toString?.()?.split?.('T')?.[0]||form[k]||''} onChange={e=>f(k,e.target.value)} />
-    </div>
-  );
 
   const saveField = async (field, val) => {
     try { await api.put(`/employees/${id}`, { [field]: val }); setEmp(p=>({...p,[field]:val})); toast.success('Saved!'); }
     catch(e) { toast.error(e.message); }
   };
 
-  const LF = ({label, value}) => (
-    <div style={{marginBottom:14}}>
-      <div style={{fontSize:11,fontWeight:700,color:'var(--text-3)',textTransform:'uppercase',letterSpacing:'0.06em',marginBottom:3}}>{label}</div>
-      <div style={{fontSize:13,fontWeight:500,color:'var(--text)',borderBottom:'1px solid var(--border)',paddingBottom:6}}>{value||'—'}</div>
-    </div>
-  );
 
   return (
     <div>
@@ -421,7 +433,7 @@ export default function EmployeeProfilePage() {
                 {editing ? (
                   <>
                     <div className="form-row">
-                      <InputField label="Date of Birth" k="birth_date" type="date" />
+                      <InputField label="Date of Birth" k="birth_date" type="date" form={form} onChange={f} />
                       <div className="form-group"><label className="form-label">Gender</label>
                         <select className="form-control" value={form.gender||''} onChange={e=>f('gender',e.target.value)}>
                           <option value="">Select...</option>
@@ -430,7 +442,7 @@ export default function EmployeeProfilePage() {
                       </div>
                     </div>
                     <div className="form-row">
-                      <InputField label="Nationality" k="nationality" />
+                      <InputField label="Nationality" k="nationality" form={form} onChange={f} />
                       <div className="form-group"><label className="form-label">Marital Status</label>
                         <select className="form-control" value={form.marital_status||''} onChange={e=>f('marital_status',e.target.value)}>
                           <option value="">Select...</option>
@@ -438,7 +450,7 @@ export default function EmployeeProfilePage() {
                         </select>
                       </div>
                     </div>
-                    <InputField label="Personal Email" k="personal_email" type="email" />
+                    <InputField label="Personal Email" k="personal_email" type="email" form={form} onChange={f} />
                     <div className="form-group"><label className="form-label">Permanent Address</label><textarea className="form-control" rows={2} value={form.permanent_address||''} onChange={e=>f('permanent_address',e.target.value)} /></div>
                   </>
                 ) : (
@@ -457,16 +469,16 @@ export default function EmployeeProfilePage() {
                 {editing ? (
                   <>
                     <div className="form-row">
-                      <InputField label="Account Number" k="bank_account" />
-                      <InputField label="Bank Name" k="bank_name" />
+                      <InputField label="Account Number" k="bank_account" form={form} onChange={f} />
+                      <InputField label="Bank Name" k="bank_name" form={form} onChange={f} />
                     </div>
                     <div className="form-row">
-                      <InputField label="IFSC Code" k="ifsc_code" />
-                      <InputField label="PAN Number" k="pan_number" />
+                      <InputField label="IFSC Code" k="ifsc_code" form={form} onChange={f} />
+                      <InputField label="PAN Number" k="pan_number" form={form} onChange={f} />
                     </div>
                     <div className="form-row">
-                      <InputField label="UAN Number" k="uan_number" />
-                      <InputField label="UAM ID" k="uam_id" />
+                      <InputField label="UAN Number" k="uan_number" form={form} onChange={f} />
+                      <InputField label="UAM ID" k="uam_id" form={form} onChange={f} />
                     </div>
                   </>
                 ) : (
@@ -489,14 +501,6 @@ export default function EmployeeProfilePage() {
               const v = getSalaryValues();
               const dWpw = salaryEditing ? (salaryForm.working_days_per_week||5) : (emp.working_days_per_week||5);
 
-              const EditPct = ({ k }) => (
-                <div style={{display:'flex',alignItems:'center',gap:4}}>
-                  <input type="number" min="0" max="100" step="0.01" value={salaryForm[k]}
-                    onChange={e=>sf(k,e.target.value)}
-                    style={{width:64,padding:'2px 6px',fontSize:12,border:'1px solid var(--primary)',borderRadius:6,textAlign:'right'}} />
-                  <span style={{fontSize:12,color:'var(--text-3)'}}>%</span>
-                </div>
-              );
 
               return (
                 <>
@@ -541,19 +545,19 @@ export default function EmployeeProfilePage() {
                       <div style={{fontSize:12,fontWeight:700,color:'var(--primary)',textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:12,borderBottom:'2px solid var(--primary-light)',paddingBottom:4}}>Earnings</div>
                       
                       <SalaryRow label="Basic Salary" value={v.basic} pct={v.bp} desc={`${v.bp}% of Monthly Wage`} 
-                        editInput={salaryEditing && <EditPct k="basic_pct" />} />
+                        editInput={salaryEditing && <EditPct k="basic_pct" salaryForm={salaryForm} onChange={sf} />} />
                       
                       <SalaryRow label="House Rent Allowance" value={v.hra} pct={v.hp} desc={`${v.hp}% of Basic Salary`}
-                        editInput={salaryEditing && <EditPct k="hra_pct" />} />
+                        editInput={salaryEditing && <EditPct k="hra_pct" salaryForm={salaryForm} onChange={sf} />} />
                       
                       <SalaryRow label="Standard Allowance" value={v.std} pct={v.sp} desc={`${v.sp}% of Basic Salary`}
-                        editInput={salaryEditing && <EditPct k="standard_allowance_pct" />} />
+                        editInput={salaryEditing && <EditPct k="standard_allowance_pct" salaryForm={salaryForm} onChange={sf} />} />
                       
                       <SalaryRow label="Performance Bonus" value={v.perf} pct={v.pp} desc={`${v.pp}% of Basic Salary`}
-                        editInput={salaryEditing && <EditPct k="perf_pct" />} />
+                        editInput={salaryEditing && <EditPct k="perf_pct" salaryForm={salaryForm} onChange={sf} />} />
                       
                       <SalaryRow label="Leave Travel Allowance" value={v.lta} pct={v.lp} desc={`${v.lp}% of Basic Salary`}
-                        editInput={salaryEditing && <EditPct k="lta_pct" />} />
+                        editInput={salaryEditing && <EditPct k="lta_pct" salaryForm={salaryForm} onChange={sf} />} />
                       
                       <SalaryRow label="Fixed Allowance" value={v.fixed} desc="Balancing Component" />
 
@@ -567,7 +571,7 @@ export default function EmployeeProfilePage() {
                       <div style={{fontSize:12,fontWeight:700,color:'var(--danger)',textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:12,borderBottom:'2px solid var(--danger-light)',paddingBottom:4}}>Deductions</div>
                       
                       <SalaryRow label="Employee PF" value={v.ePf} pct={v.ep} desc={`${v.ep}% of Basic Salary`}
-                        editInput={salaryEditing && <EditPct k="employee_pf_pct" />} />
+                        editInput={salaryEditing && <EditPct k="employee_pf_pct" salaryForm={salaryForm} onChange={sf} />} />
                       
                       <SalaryRow label="Professional Tax" value={v.pt} desc="Flat deduction"
                         editInput={salaryEditing && (
@@ -582,7 +586,7 @@ export default function EmployeeProfilePage() {
                       <div style={{marginTop:20,paddingTop:12,borderTop:'1px solid var(--border)'}}>
                         <div style={{fontSize:12,fontWeight:700,color:'var(--text-3)',textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:12,borderBottom:'2px solid var(--border)',paddingBottom:4}}>Contributions (Non-Gross)</div>
                         <SalaryRow label="Employer PF" value={v.rPf} pct={v.erp} desc={`${v.erp}% of Basic Salary`}
-                          editInput={salaryEditing && <EditPct k="employer_pf_pct" />} />
+                          editInput={salaryEditing && <EditPct k="employer_pf_pct" salaryForm={salaryForm} onChange={sf} />} />
                       </div>
 
                       <div style={{display:'flex',justifyContent:'space-between',padding:'14px 0',fontWeight:800,fontSize:16,color:'var(--danger)',borderTop:'2px solid var(--danger-light)',marginTop:8}}>
