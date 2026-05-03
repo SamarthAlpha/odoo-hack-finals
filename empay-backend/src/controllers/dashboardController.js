@@ -7,14 +7,13 @@ const getStats = async (req, res) => {
     const year = new Date().getFullYear();
 
     const [[{ total_employees }]] = await db.execute(`SELECT COUNT(*) as total_employees FROM employees WHERE status='active'`);
+    
+    // Use CURDATE() for consistency with MySQL timezone setting
     const [[{ present_today }]] = await db.execute(
-      `SELECT COUNT(*) as present_today FROM attendance_summary WHERE date = ? AND status = 'present'`, [today]
+      `SELECT COUNT(*) as present_today FROM attendance_summary WHERE date = CURDATE() AND status IN ('present', 'half_day')`
     );
     const [[{ on_leave_today }]] = await db.execute(
-      `SELECT COUNT(*) as on_leave_today FROM attendance_summary WHERE date = ? AND status = 'on_leave'`, [today]
-    );
-    const [[{ absent_today }]] = await db.execute(
-      `SELECT COUNT(*) as absent_today FROM attendance_summary WHERE date = ? AND status IN ('absent','half_day')`, [today]
+      `SELECT COUNT(*) as on_leave_today FROM attendance_summary WHERE date = CURDATE() AND status = 'on_leave'`
     );
     const [[{ pending_leaves }]] = await db.execute(
       `SELECT COUNT(*) as pending_leaves FROM time_off_requests WHERE status = 'pending'`
@@ -34,17 +33,19 @@ const getStats = async (req, res) => {
     const [attendanceTrend] = await db.execute(
       `SELECT MONTH(date) as month, YEAR(date) as year,
               SUM(CASE WHEN status='present' THEN 1 ELSE 0 END) as present_count,
-              SUM(CASE WHEN status='absent' THEN 1 ELSE 0 END) as absent_count,
-              SUM(CASE WHEN status='half_day' THEN 1 ELSE 0 END) as half_day_count
+              SUM(CASE WHEN status='half_day' THEN 1 ELSE 0 END) as half_day_count,
+              SUM(CASE WHEN status='absent' THEN 1 ELSE 0 END) as absent_count
        FROM attendance_summary
        WHERE date >= DATE_SUB(CURDATE(), INTERVAL 6 MONTH)
        GROUP BY YEAR(date), MONTH(date)
        ORDER BY year, month`
     );
 
-    // Leave type distribution
+    // Leave type distribution (approved requests only for better accuracy)
     const [leaveDistribution] = await db.execute(
-      `SELECT leave_type, COUNT(*) as count FROM time_off_requests WHERE YEAR(created_at) = ? GROUP BY leave_type`, [year]
+      `SELECT leave_type, COUNT(*) as count FROM time_off_requests 
+       WHERE status = 'approved' AND (YEAR(start_date) = ? OR YEAR(end_date) = ?) 
+       GROUP BY leave_type`, [year, year]
     );
 
     res.json({
@@ -53,7 +54,7 @@ const getStats = async (req, res) => {
         total_employees,
         present_today,
         on_leave_today,
-        absent_today: total_employees - present_today - on_leave_today,
+        absent_today: Math.max(0, total_employees - present_today - on_leave_today),
         pending_leaves,
         total_payroll: payrollStats.total_payroll || 0,
         payroll_count: payrollStats.payroll_count || 0,

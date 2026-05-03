@@ -92,7 +92,7 @@ export default function LoginPage() {
             </button>
           </form>
 
-          <div style={{ marginTop: 32, padding: '16px', background: 'var(--surface-2)', borderRadius: 'var(--radius)', border: '1px solid var(--border)' }}>
+          <div style={{ display: 'none', marginTop: 32, padding: '16px', background: 'var(--surface-2)', borderRadius: 'var(--radius)', border: '1px solid var(--border)' }}>
             <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>Default Credentials</div>
             <div style={{ fontSize: 12, color: 'var(--text-3)', lineHeight: 1.9 }}>
               Admin: <code style={{ background: 'var(--bg)', padding: '1px 5px', borderRadius: 3, color: 'var(--primary)' }}>Admin@1234</code><br />
@@ -101,6 +101,7 @@ export default function LoginPage() {
               Employees: <code style={{ background: 'var(--bg)', padding: '1px 5px', borderRadius: 3, color: 'var(--primary)' }}>Employee@1234</code>
             </div>
           </div>
+
         </div>
       </div>
     </div>

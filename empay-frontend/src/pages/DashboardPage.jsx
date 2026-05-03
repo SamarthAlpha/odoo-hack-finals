@@ -54,6 +54,12 @@ export default function DashboardPage() {
             <h1>Dashboard</h1>
             <p>Welcome back, <strong>{user?.name}</strong> — here's your organization overview.</p>
           </div>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button className="btn btn-secondary" onClick={() => {
+              setLoading(true);
+              api.get('/dashboard/stats').then(r => setStats(r)).finally(() => setLoading(false));
+            }}>🔄 Refresh</button>
+          </div>
         </div>
       </div>
 
